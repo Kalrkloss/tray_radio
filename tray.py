@@ -1,4 +1,7 @@
 import queue
+import os
+import sys
+import logging
 from typing import Optional, Callable
 
 import pystray
@@ -7,6 +10,8 @@ from pystray import Menu, MenuItem
 
 from icon_generator import create_tray_icon, create_playing_icon, create_stopped_icon
 from playlist_manager import PlaylistManager
+
+logger = logging.getLogger(__name__)
 
 
 class TrayApp:
@@ -23,6 +28,7 @@ class TrayApp:
         self._callbacks = callbacks
 
     def start(self):
+        self._register_aumid_shortcut()
         placeholder = Menu(MenuItem("Loading...", None, enabled=False))
         icon = pystray.Icon(
             "tray_radio",
@@ -190,13 +196,51 @@ class TrayApp:
         if icon_img:
             self._icon.icon = icon_img
 
+    def _register_aumid_shortcut(self):
+        import tempfile
+        from win32com.propsys import propsys, pscon
+        from win32com.shell import shell, shellcon
+        import win32com.client, pythoncom
+
+        startup_folder = os.path.join(
+            os.environ.get("APPDATA", ""),
+            r"Microsoft\Windows\Start Menu\Programs",
+        )
+        os.makedirs(startup_folder, exist_ok=True)
+        lnk_path = os.path.join(startup_folder, "Tray Radio.lnk")
+        if os.path.exists(lnk_path):
+            return
+
+        ico_path = os.path.join(tempfile.gettempdir(), "tray_radio_icon.ico")
+        if not os.path.exists(ico_path):
+            create_playing_icon().save(ico_path, format="ICO", sizes=[(16,16),(32,32),(64,64)])
+
+        try:
+            wshell = win32com.client.Dispatch("WScript.Shell")
+            s = wshell.CreateShortcut(lnk_path)
+            s.TargetPath = sys.executable
+            s.Arguments = f'"{os.path.abspath("main.py")}"'
+            s.IconLocation = f"{ico_path}, 0"
+            s.Save()
+
+            ps = propsys.SHGetPropertyStoreFromParsingName(
+                lnk_path, None, shellcon.GPS_READWRITE, propsys.IID_IPropertyStore,
+            )
+            pv = propsys.PROPVARIANTType("TrayRadio", 8)
+            ps.SetValue(pscon.PKEY_AppUserModel_ID, pv)
+            ps.Commit()
+            logger.info("AUMID shortcut created at %s", lnk_path)
+        except Exception:
+            logger.warning("Could not create AUMID shortcut", exc_info=True)
+
     def notify(self, title: str, message: str):
-        if self._icon:
-            self.dismiss_notification()
-            try:
-                self._icon.notify(title, message)
-            except Exception:
-                pass
+        if not self._icon:
+            return
+        self.dismiss_notification()
+        try:
+            self._icon.notify(title, message)
+        except Exception:
+            pass
 
     def dismiss_notification(self):
         if not self._icon:

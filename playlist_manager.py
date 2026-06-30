@@ -99,10 +99,19 @@ class PlaylistManager:
                 self.current_playlist_index = max(0, len(self.playlists) - 1) if self.playlists else -1
             self.save()
 
-    def add_stream(self, playlist_index: int, stream: Stream):
+    def has_stream(self, playlist_index: int, uuid: str) -> bool:
         if 0 <= playlist_index < len(self.playlists):
+            return any(s.uuid == uuid for s in self.playlists[playlist_index].streams)
+        return False
+
+    def add_stream(self, playlist_index: int, stream: Stream) -> bool:
+        if 0 <= playlist_index < len(self.playlists):
+            if self.has_stream(playlist_index, stream.uuid):
+                return False
             self.playlists[playlist_index].streams.append(stream)
             self.save()
+            return True
+        return False
 
     def remove_stream(self, playlist_index: int, stream_index: int):
         if 0 <= playlist_index < len(self.playlists):
@@ -119,6 +128,8 @@ class PlaylistManager:
         if 0 <= from_playlist < len(self.playlists) and 0 <= to_playlist < len(self.playlists):
             src = self.playlists[from_playlist]
             if 0 <= stream_index < len(src.streams):
+                if src.streams[stream_index].uuid and self.has_stream(to_playlist, src.streams[stream_index].uuid):
+                    return
                 stream = src.streams.pop(stream_index)
                 self.playlists[to_playlist].streams.append(stream)
                 self.save()

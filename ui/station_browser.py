@@ -244,9 +244,11 @@ class StationBrowserDialog(QDialog):
 
         r = self._results[row]
         stream = Stream(**RadioBrowserClient.station_to_stream(r))
-        self._pm.add_stream(pl_idx, stream)
-        self._client.click_station(r.get("stationuuid", ""))
-        self._status_label.setText(f'Added "{stream.name}" to "{self._pm.playlists[pl_idx].name}"')
+        if self._pm.add_stream(pl_idx, stream):
+            self._client.click_station(r.get("stationuuid", ""))
+            self._status_label.setText(f'Added "{stream.name}" to "{self._pm.playlists[pl_idx].name}"')
+        else:
+            self._status_label.setText(f'"{stream.name}" already in "{self._pm.playlists[pl_idx].name}"')
 
     def _preview(self):
         row = self._table.currentRow()

@@ -4,7 +4,6 @@ import json
 import logging
 
 from PyQt5.QtWidgets import QApplication, QMessageBox
-from PyQt5.QtGui import QIcon, QPixmap
 from PyQt5.QtCore import QTimer, Qt
 
 from proxy import ProxyConfig, resolve_proxy_for_url, set_auto_start
@@ -242,15 +241,14 @@ class TrayRadioApp:
 
 
 def main():
-    import ctypes, io
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TrayRadio")
+    sys.argv[0] = "Tray Radio"
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TrayRadio")
+    except Exception:
+        pass
     app = QApplication(sys.argv)
     app.setApplicationName("Tray Radio")
-    _icon_buf = io.BytesIO()
-    create_playing_icon().save(_icon_buf, format="PNG")
-    _pixmap = QPixmap()
-    _pixmap.loadFromData(_icon_buf.getvalue())
-    app.setWindowIcon(QIcon(_pixmap))
     app.setQuitOnLastWindowClosed(False)
 
     tray_app = TrayRadioApp()
