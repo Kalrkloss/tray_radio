@@ -86,22 +86,36 @@ class TrayApp:
         items.append(Menu.SEPARATOR)
 
         items.append(MenuItem(
-            "Play/Pause",
+            "▶ Play/Pause",
             lambda icon, item: self.cmd_queue.put(("toggle_play_pause", [])),
             enabled=self._is_playing or bool(self._current_station),
         ))
 
         items.append(MenuItem(
-            "Stop",
+            "⏹ Stop",
             lambda icon, item: self.cmd_queue.put(("stop_playback", [])),
             enabled=self._is_playing,
         ))
 
+        items.append(MenuItem(
+            "⏭ Next",
+            lambda icon, item: self.cmd_queue.put(("play_next", [])),
+            enabled=self._pm.get_next_stream() is not None,
+        ))
+
+        items.append(MenuItem(
+            "⏮ Previous",
+            lambda icon, item: self.cmd_queue.put(("play_previous", [])),
+            enabled=self._pm.get_prev_stream() is not None,
+        ))
+
         items.append(Menu.SEPARATOR)
 
-        playlists_menu = self._build_playlists_menu()
-        if playlists_menu:
-            items.append(MenuItem("Playlists", playlists_menu))
+        if self._pm.playlists:
+            items.append(MenuItem("Playlists", None, enabled=False))
+            for pl_idx, pl in enumerate(self._pm.playlists):
+                stream_menu = self._build_stream_menu(pl_idx, pl.name, pl.streams)
+                items.append(MenuItem(pl.name, stream_menu))
 
         items.append(Menu.SEPARATOR)
 

@@ -57,11 +57,14 @@ Run `Tray Radio.exe`. An icon appears in the system tray (near the clock). Right
 ### Tray Menu
 
 | Menu Item | Action |
-|---|---|
+|---|---|---|
 | Playing: _station name_ | Currently playing stream (truncated to 64 chars) |
-| Play/Pause | Toggle playback |
-| Stop | Stop playback |
-| Playlists | Submenu listing your playlists; click to play |
+| ▶ Play/Pause | Toggle playback |
+| ⏹ Stop | Stop playback |
+| ⏭ Next | Skip to next stream in current playlist |
+| ⏮ Previous | Go to previous stream in current playlist |
+| Playlists | Section header (disabled) |
+| _Playlist Name_ | Submenu listing that playlist's streams; click to play |
 | Browse Stations | Open the station browser to search and add stations |
 | Add Stream… | Add a custom stream by name and URL |
 | Edit Playlists | Open the playlist editor |

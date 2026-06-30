@@ -111,6 +111,8 @@ class TrayRadioApp:
         self._tray.set_callbacks({
             "toggle_play_pause": self._toggle_play_pause,
             "stop_playback": self._stop_playback,
+            "play_next": self._play_next,
+            "play_previous": self._play_previous,
             "play_stream": self._play_stream,
             "show_settings": self._show_settings,
             "show_station_browser": self._show_station_browser,
