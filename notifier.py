@@ -1,33 +1,36 @@
 import logging
 import subprocess
 import threading
-import uuid
+import xml.sax.saxutils as saxutils
 
 logger = logging.getLogger(__name__)
 
-_PS_INIT = (
-    'Add-Type -AssemblyName System.Runtime.WindowsRuntime\n'
-    '$n = [Windows.UI.Notifications.ToastNotificationManager,'
-    ' Windows.UI.Notifications, ContentType = WindowsRuntime]\n'
+_PS_LOAD_TYPES = (
+    "[Windows.UI.Notifications.ToastNotificationManager,"
+    " Windows.UI.Notifications, ContentType = WindowsRuntime]"
+    " | Out-Null\n"
+    "[Windows.Data.Xml.Dom.XmlDocument,"
+    " Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]"
+    " | Out-Null\n"
 )
 
-_PS_TOAST_TEMPLATE = (
-    "$t = [Windows.UI.Notifications.ToastNotificationManager]::"
-    "GetTemplateContent(0)\n"
-    "$x = [Windows.Data.Xml.Dom.XmlDocument]::New()\n"
-    "$x.LoadXml($t.GetXml())\n"
-    "$ns = $x.SelectNodes('//text')\n"
-    "if ($ns.Length -ge 1) {{"
-    "$ns[0].AppendChild($x.CreateTextNode('{title}')) | Out-Null}}\n"
-    "if ($ns.Length -ge 2) {{"
-    "$ns[1].AppendChild($x.CreateTextNode('{message}')) | Out-Null}}\n"
-    "$a = $x.CreateElement('audio')\n"
-    "$a.SetAttribute('silent','true')\n"
-    "$x.SelectSingleNode('//toast').AppendChild($a) | Out-Null\n"
-    "$n = [Windows.UI.Notifications.ToastNotification]::New($x)\n"
-    "$n.Tag = '{tag}'\n"
+_PS_TOAST = (
+    "$x = New-Object Windows.Data.Xml.Dom.XmlDocument\n"
+    "$x.LoadXml('{xml}')\n"
+    "$n = New-Object Windows.UI.Notifications.ToastNotification($x)\n"
+    "$n.Tag = 'trayradio'\n"
     "[Windows.UI.Notifications.ToastNotificationManager]::"
-    "CreateToastNotifier('TrayRadio').Show($n)\n"
+    "CreateToastNotifier('TrayRadio').Show($n) | Out-Null\n"
+)
+
+_PS_TOAST_XML = (
+    '<toast duration="long" scenario="reminder">'
+    '<visual><binding template="ToastText02">'
+    '<text id="1">{title}</text>'
+    '<text id="2">{message}</text>'
+    '</binding></visual>'
+    '<audio silent="true"/>'
+    '</toast>'
 )
 
 
@@ -46,10 +49,10 @@ class SilentToastNotifier:
                     ["powershell", "-NoProfile", "-Command", "-"],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
                     creationflags=0x08000000,
                 )
-                self._write(_PS_INIT)
+                self._write(_PS_LOAD_TYPES)
                 self._started = True
                 logger.info("Silent toast notifier started")
             except Exception as e:
@@ -57,15 +60,16 @@ class SilentToastNotifier:
                 self._proc = None
                 self._started = False
 
-    def notify(self, title, message):
+    def _build_xml(self, title: str, message: str) -> str:
+        title = saxutils.escape(title)
+        message = saxutils.escape(message)
+        return _PS_TOAST_XML.format(title=title, message=message)
+
+    def notify(self, title: str, message: str):
         if not self._started or not self._proc:
             return False
-        tag = uuid.uuid4().hex[:8]
-        title_esc = title.replace("'", "''")
-        msg_esc = message.replace("'", "''")
-        cmd = _PS_TOAST_TEMPLATE.format(
-            title=title_esc, message=msg_esc, tag=tag
-        )
+        xml = self._build_xml(title, message)
+        cmd = _PS_TOAST.format(xml=xml)
         try:
             with self._lock:
                 if self._proc and self._proc.poll() is None:
@@ -83,7 +87,7 @@ class SilentToastNotifier:
         return False
 
     def _write(self, text):
-        data = (text + "\n").encode("utf-16-le")
+        data = (text + "\n").encode("utf-8")
         self._proc.stdin.write(data)
         self._proc.stdin.flush()
 

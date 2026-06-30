@@ -145,9 +145,6 @@ class TrayRadioApp:
     def _on_player_state(self, state: str):
         is_playing = state == "playing"
         self._tray.update_playing_state(is_playing)
-        if is_playing and self._current_station:
-            self._tray.notify(self._current_station.name, "Now playing")
-            self._dismiss_after_5()
 
     def _on_player_error(self, msg: str):
         logger.error(f"Player error: {msg}")
@@ -159,7 +156,6 @@ class TrayRadioApp:
         self._tray.update_song(song)
         if self._current_station:
             self._tray.notify(self._current_station.name, song)
-            self._dismiss_after_5()
         if self._stream_info_dialog and self._stream_info_dialog.isVisible():
             self._stream_info_dialog.update_song(song)
 
@@ -192,7 +188,6 @@ class TrayRadioApp:
         url = stream.url_resolved or stream.url
         self._apply_proxy_for_url(url)
         self._set_station_icon(stream.favicon)
-        self._tray.notify(stream.name, "Connecting…")
         self._player.play(url, codec_hint=stream.codec, output_device=self._proxy_config.output_device)
         self._tray.update_station_info(stream.name, "")
         self._tray.update_playing_state(True)
@@ -200,7 +195,6 @@ class TrayRadioApp:
     def open_preview(self, name: str, url: str, codec: str = ""):
         self._current_station = Stream(uuid="", name=name, url=url, codec=codec)
         self._apply_proxy_for_url(url)
-        self._tray.notify(name, "Connecting…")
         self._player.play(url, codec_hint=codec, output_device=self._proxy_config.output_device)
         self._tray.update_station_info(name, "")
         self._tray.update_playing_state(True)
