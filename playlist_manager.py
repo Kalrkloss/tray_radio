@@ -50,6 +50,9 @@ class PlaylistManager:
         self.playlists: list[Playlist] = []
         self.current_playlist_index: int = -1
         self.current_stream_uuid: Optional[str] = None
+        self.last_preview_name: str = ""
+        self.last_preview_url: str = ""
+        self.last_preview_codec: str = ""
         self.load()
 
     def load(self):
@@ -62,6 +65,9 @@ class PlaylistManager:
                 ]
                 self.current_playlist_index = data.get("current_playlist_index", -1)
                 self.current_stream_uuid = data.get("current_stream_uuid")
+                self.last_preview_name = data.get("last_preview_name", "")
+                self.last_preview_url = data.get("last_preview_url", "")
+                self.last_preview_codec = data.get("last_preview_codec", "")
             except Exception:
                 self._init_default()
         else:
@@ -71,6 +77,9 @@ class PlaylistManager:
         self.playlists = [Playlist(name="Favorites")]
         self.current_playlist_index = 0
         self.current_stream_uuid = None
+        self.last_preview_name = ""
+        self.last_preview_url = ""
+        self.last_preview_codec = ""
         self.save()
 
     def save(self):
@@ -79,6 +88,9 @@ class PlaylistManager:
             "playlists": [p.to_dict() for p in self.playlists],
             "current_playlist_index": self.current_playlist_index,
             "current_stream_uuid": self.current_stream_uuid,
+            "last_preview_name": self.last_preview_name,
+            "last_preview_url": self.last_preview_url,
+            "last_preview_codec": self.last_preview_codec,
         }
         with open(self.filepath, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
@@ -136,11 +148,19 @@ class PlaylistManager:
 
     def get_current_stream(self) -> Optional[Stream]:
         if self.current_playlist_index < 0 or self.current_playlist_index >= len(self.playlists):
-            return None
+            return self._get_preview_fallback()
         pl = self.playlists[self.current_playlist_index]
         for s in pl.streams:
             if s.uuid == self.current_stream_uuid:
                 return s
+        return self._get_preview_fallback()
+
+    def _get_preview_fallback(self) -> Optional[Stream]:
+        if self.last_preview_url:
+            return Stream(
+                uuid="__preview__", name=self.last_preview_name,
+                url=self.last_preview_url, codec=self.last_preview_codec,
+            )
         return None
 
     def set_current_stream(self, uuid: str):

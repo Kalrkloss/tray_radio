@@ -136,10 +136,12 @@ class TrayRadioApp:
         self._check_auto_play()
 
     def _check_auto_play(self):
-        if not self._proxy_config.auto_play:
-            return
         stream = self._pm.get_current_stream()
-        if stream:
+        if not stream:
+            return
+        self._current_station = stream
+        self._tray.update_station_info(stream.name, "")
+        if self._proxy_config.auto_play:
             self._play_stream(stream)
 
     def _dismiss_after_5(self):
@@ -202,7 +204,12 @@ class TrayRadioApp:
         self._tray.update_playing_state(True)
 
     def open_preview(self, name: str, url: str, codec: str = ""):
-        self._current_station = Stream(uuid="", name=name, url=url, codec=codec)
+        self._current_station = Stream(uuid="__preview__", name=name, url=url, codec=codec)
+        self._pm.set_current_stream("__preview__")
+        self._pm.last_preview_name = name
+        self._pm.last_preview_url = url
+        self._pm.last_preview_codec = codec
+        self._pm.save()
         self._apply_proxy_for_url(url)
         self._player.play(url, codec_hint=codec, output_device=self._proxy_config.output_device)
         self._tray.update_station_info(name, "")
