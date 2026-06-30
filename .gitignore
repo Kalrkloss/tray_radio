@@ -4,6 +4,5 @@ logo_cache/
 config.json
 org.eclipse.import/
 dist/*
-!dist/*.msi
 *.spec
 build/
