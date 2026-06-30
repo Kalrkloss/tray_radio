@@ -4,7 +4,8 @@ import json
 import logging
 
 from PyQt5.QtWidgets import QApplication, QMessageBox
-from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import QTimer, Qt
 
 from proxy import ProxyConfig, resolve_proxy_for_url, set_auto_start
 from playlist_manager import PlaylistManager, Stream
@@ -188,15 +189,15 @@ class TrayRadioApp:
         self._apply_proxy_for_url(url)
         self._set_station_icon(stream.favicon)
         self._tray.notify(stream.name, "Connecting…")
-        self._player.play(url)
+        self._player.play(url, codec_hint=stream.codec)
         self._tray.update_station_info(stream.name, "")
         self._tray.update_playing_state(True)
 
-    def open_preview(self, name: str, url: str):
-        self._current_station = Stream(uuid="", name=name, url=url)
+    def open_preview(self, name: str, url: str, codec: str = ""):
+        self._current_station = Stream(uuid="", name=name, url=url, codec=codec)
         self._apply_proxy_for_url(url)
         self._tray.notify(name, "Connecting…")
-        self._player.play(url)
+        self._player.play(url, codec_hint=codec)
         self._tray.update_station_info(name, "")
         self._tray.update_playing_state(True)
 
@@ -234,19 +235,24 @@ class TrayRadioApp:
 
     def _quit(self):
         logger.info("Shutting down...")
-        self._player.stop()
+        self._player.shutdown()
         if self._tray:
             self._tray.stop()
         QApplication.instance().quit()
 
 
 def main():
+    import ctypes
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("TrayRadio")
     app = QApplication(sys.argv)
+    app.setApplicationName("Tray Radio")
+    app.setWindowIcon(QIcon(create_playing_icon()))
     app.setQuitOnLastWindowClosed(False)
 
     tray_app = TrayRadioApp()
     tray_app.start()
     logger.info("Tray icon ready")
+    app.aboutToQuit.connect(tray_app._player.shutdown)
 
     sys.exit(app.exec_())
 

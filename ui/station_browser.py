@@ -28,6 +28,7 @@ class SearchWorker(QThread):
             self.error.emit(str(e))
 
 
+
 class ScanWorker(QThread):
     finished = pyqtSignal(list)
     progress = pyqtSignal(int, int)
@@ -63,6 +64,7 @@ class StationBrowserDialog(QDialog):
         self._results = []
         self._worker = None
         self._scan_worker = None
+        self._old_workers = []
         self._search_seq = 0
         self._build_ui()
 
@@ -109,7 +111,7 @@ class StationBrowserDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         self._playlist_combo = QComboBox()
-        self._refresh_playlist_combo()
+        self.refresh_playlist_combo()
         self._add_btn = QPushButton("Add to Playlist")
         self._add_btn.clicked.connect(self._add_to_playlist)
         self._preview_btn = QPushButton("Preview")
@@ -156,10 +158,24 @@ class StationBrowserDialog(QDialog):
         self._search_btn.setText("Searching...")
         self._status_label.setText("Searching...")
 
+        self._stash_worker(self._worker)
         self._worker = SearchWorker(self._client, params)
         self._worker.finished.connect(lambda r: self._on_results(r, seq))
         self._worker.error.connect(self._on_error)
         self._worker.start()
+
+    def _stash_worker(self, w):
+        if w is None:
+            return
+        self._old_workers.append(w)
+        w.finished.connect(lambda: self._release_worker(w))
+        w.error.connect(lambda: self._release_worker(w))
+
+    def _release_worker(self, w):
+        try:
+            self._old_workers.remove(w)
+        except ValueError:
+            pass
 
     def _on_results(self, results, seq):
         if seq != self._search_seq:
@@ -173,6 +189,7 @@ class StationBrowserDialog(QDialog):
         session = self._proxy_config.create_session()
         proxies = session.proxies if session.proxies else None
 
+        self._stash_worker(self._scan_worker)
         self._scan_worker = ScanWorker(
             results,
             workers=self._proxy_config.workers,
@@ -239,7 +256,8 @@ class StationBrowserDialog(QDialog):
         stream_data = RadioBrowserClient.station_to_stream(r)
         url = stream_data.get("url_resolved") or stream_data.get("url", "")
         name = stream_data.get("name", "") or r.get("name", "")
+        codec = stream_data.get("codec", "") or r.get("codec", "")
         if url:
             preview_cb = getattr(self, "open_preview", None)
             if preview_cb:
-                preview_cb(name, url)
+                preview_cb(name, url, codec)

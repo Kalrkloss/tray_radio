@@ -8,11 +8,22 @@ logger = logging.getLogger(__name__)
 
 
 _KNOWN_BAD_CT = {"text/html", "text/plain", "application/xml", "text/xml"}
+_SUPPORTED_CODECS = {"mp3", "mpeg", "ogg", "vorbis", "flac", "wav", "aac", "aac+"}
+
+
+def _is_supported_codec(codec: str) -> bool:
+    c = codec.strip().lower()
+    if c in _SUPPORTED_CODECS or c.startswith("aac"):
+        return True
+    return False
 
 
 def _check_stream(station: dict, session: requests.Session) -> dict:
-    url = station.get("url_resolved") or station.get("url", "")
     result = dict(station, responsive=False)
+    codec = station.get("codec", "")
+    if codec and not _is_supported_codec(codec):
+        return result
+    url = station.get("url_resolved") or station.get("url", "")
     if not url:
         return result
     try:
@@ -51,6 +62,9 @@ def scan_streams(
     session.headers.update({"User-Agent": "TrayRadio/1.0"})
     if proxies:
         session.proxies.update(proxies)
+
+    # Pre-filter unsupported codecs to avoid wasted HTTP requests
+    stations = [s for s in stations if not s.get("codec") or _is_supported_codec(s.get("codec", ""))]
 
     total = len(stations)
     checked = 0

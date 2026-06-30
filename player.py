@@ -1,7 +1,8 @@
 import logging
 import socket
+import threading
 import urllib.request
-from typing import Optional
+from typing import Optional, Callable
 from threading import Lock
 
 import miniaudio
@@ -13,39 +14,276 @@ logger = logging.getLogger(__name__)
 
 _SUPPORTED_FORMATS = {FileFormat.MP3, FileFormat.FLAC, FileFormat.VORBIS, FileFormat.WAV}
 _STREAM_TIMEOUT = 15
+_AAC_READ_CHUNK = 8192
+_AAC_PCM_THRESHOLD = 131072
+
+
+def _ct_to_codec(content_type: str) -> Optional[str]:
+    ct = content_type.split(";")[0].strip().lower()
+    mapping = {
+        "audio/mpeg": "mp3",
+        "audio/mp3": "mp3",
+        "audio/ogg": "vorbis",
+        "audio/vorbis": "vorbis",
+        "audio/flac": "flac",
+        "audio/wav": "wav",
+        "audio/wave": "wav",
+        "audio/x-wav": "wav",
+        "audio/aac": "aac",
+        "audio/aacp": "aac",
+        "audio/x-aac": "aac",
+        "audio/mp4": "aac",
+        "audio/x-m4a": "aac",
+    }
+    return mapping.get(ct)
+
+
+def _parse_icy_meta(data: bytes, title_cb: Callable = None):
+    if not data or not title_cb:
+        return
+    try:
+        text = data.decode("utf-8", errors="replace").strip("\x00").strip()
+        for part in text.split(";"):
+            part = part.strip()
+            if part.lower().startswith("streamtitle="):
+                val = part.split("=", 1)[1].strip("'\"")
+                if val:
+                    title_cb(val)
+    except Exception:
+        pass
+
+
+def _av_stream_iter(url: str, title_cb: Callable = None):
+    import av
+    import numpy as np
+    from queue import Queue
+
+    resp = urllib.request.urlopen(url)
+    icy_metaint = int(resp.headers.get("icy-metaint", 0))
+
+    # Detect codec from Content-Type
+    ct = resp.headers.get("Content-Type", "")
+    codec_name = _ct_to_codec(ct)
+
+    if not codec_name:
+        peek = resp.read(4096)
+        for try_name in ("aac", "mp3", "vorbis", "flac", "opus"):
+            try:
+                c = av.CodecContext.create(try_name, "r")
+                pkts = c.parse(peek)
+                if pkts:
+                    codec_name = try_name
+                    break
+            except Exception:
+                continue
+        if not codec_name:
+            raise RuntimeError(f"Cannot detect audio codec (Content-Type: {ct})")
+    else:
+        peek = b""
+
+    codec = av.CodecContext.create(codec_name, "r")
+    resampler = av.AudioResampler(
+        format="s16",
+        layout="stereo",
+        rate=44100,
+    )
+
+    # Background reader thread feeds an unbounded queue so the generator never blocks on I/O
+    _queue = Queue()
+    _reader_stop = threading.Event()
+
+    def _reader():
+        try:
+            if peek:
+                _queue.put(peek)
+            while not _reader_stop.is_set():
+                try:
+                    raw = resp.read(_AAC_READ_CHUNK)
+                except Exception:
+                    break
+                if not raw:
+                    break
+                _queue.put(raw)
+        except Exception:
+            pass
+        finally:
+            try:
+                _queue.put_nowait(None)
+            except Exception:
+                pass
+
+    _reader_thread = threading.Thread(target=_reader, daemon=True)
+    _reader_thread.start()
+
+    bytes_since_meta = 0
+    meta_buf = b""
+    pcm_buf = b""
+    eof = False
+
+    def _abort():
+        _reader_stop.set()
+        try:
+            resp.close()
+        except Exception:
+            pass
+
+    def gen():
+        nonlocal bytes_since_meta, meta_buf, pcm_buf, eof, resampler
+        from queue import Empty as _QueueEmpty
+
+        want_frames = yield  # receive framecount (or None on first next())
+
+        while True:
+            # Decode more PCM if buffer is low
+            if not eof and len(pcm_buf) < _AAC_PCM_THRESHOLD:
+                had_data = True
+                while had_data and len(pcm_buf) < _AAC_PCM_THRESHOLD:
+                    try:
+                        raw = _queue.get_nowait()
+                    except _QueueEmpty:
+                        break
+                    had_data = True
+                    if raw is None:
+                        eof = True
+                        break
+                    if icy_metaint:
+                        meta_buf += raw
+                        clean = b""
+                        while meta_buf:
+                            avail = icy_metaint - bytes_since_meta
+                            if avail > 0 and len(meta_buf) >= avail:
+                                clean += meta_buf[:avail]
+                                meta_buf = meta_buf[avail:]
+                                bytes_since_meta += avail
+                            elif avail > 0:
+                                break
+                            if bytes_since_meta >= icy_metaint:
+                                if meta_buf:
+                                    meta_len = meta_buf[0] * 16
+                                    meta_buf = meta_buf[1:]
+                                    if meta_len > 0 and len(meta_buf) >= meta_len:
+                                        _parse_icy_meta(meta_buf[:meta_len], title_cb)
+                                        meta_buf = meta_buf[meta_len:]
+                                    bytes_since_meta = 0
+                        raw = clean
+                    else:
+                        meta_buf = b""
+
+                    packets = codec.parse(raw)
+                    for packet in packets:
+                        try:
+                            for frame in codec.decode(packet):
+                                for out in resampler.resample(frame):
+                                    pcm_buf += out.to_ndarray().tobytes()
+                        except Exception:
+                            pass
+
+                if eof:
+                    # Flush remaining packets from the decoder
+                    packets = codec.parse(b"")
+                    for packet in packets:
+                        try:
+                            for frame in codec.decode(packet):
+                                for out in resampler.resample(frame):
+                                    pcm_buf += out.to_ndarray().tobytes()
+                        except Exception:
+                            pass
+                    try:
+                        for frame in codec.decode(None):
+                            for out in resampler.resample(frame):
+                                pcm_buf += out.to_ndarray().tobytes()
+                        for out in resampler.resample(None):
+                            pcm_buf += out.to_ndarray().tobytes()
+                    except Exception:
+                        pass
+
+            # Yield requested amount
+            if want_frames is None:
+                want_frames = 2048
+            need = want_frames * 4  # 2 channels * 2 bytes
+            if len(pcm_buf) >= need:
+                out = pcm_buf[:need]
+                pcm_buf = pcm_buf[need:]
+            else:
+                out = pcm_buf
+                pcm_buf = b""
+
+            want_frames = yield out
+
+            if eof and not pcm_buf and not out:
+                return
+
+    class _AvStreamWrapper:
+        def __init__(self):
+            self._gen = gen()
+            self._abort = _abort
+            next(self._gen)
+
+        def send(self, value):
+            return self._gen.send(value)
+
+        def __next__(self):
+            return next(self._gen)
+
+        def close(self):
+            self._gen.close()
+
+        def __iter__(self):
+            return self
+
+    return _AvStreamWrapper()
 
 
 class PlayWorker(QThread):
     ready = pyqtSignal(object, object, object)
     error = pyqtSignal(str)
 
-    def __init__(self, url: str, title_cb=None):
+    def __init__(self, url: str, codec_hint: str = "", title_cb=None):
         super().__init__()
         self._url = url
+        self._codec_hint = codec_hint
         self._title_cb = title_cb
 
     def run(self):
         try:
             socket.setdefaulttimeout(_STREAM_TIMEOUT)
-            client = IceCastClient(self._url, update_stream_title=self._title_cb)
-            fmt = client.audio_format
-            if fmt == FileFormat.UNKNOWN:
-                raise RuntimeError(
-                    "Unsupported audio format (only MP3, FLAC, Ogg Vorbis, WAV supported)"
-                )
-            if fmt not in _SUPPORTED_FORMATS:
-                raise RuntimeError(f"Unsupported audio format: {fmt}")
+            codec = self._codec_hint.lower() if self._codec_hint else ""
 
-            stream = miniaudio.stream_any(
-                client,
-                source_format=fmt,
-                output_format=SampleFormat.SIGNED16,
-                nchannels=2,
-                sample_rate=44100,
-            )
-            device = PlaybackDevice()
-            device.start(stream)
-            self.ready.emit(client, stream, device)
+            # Skip IceCastClient entirely for codecs miniaudio can't handle
+            if codec and not any(
+                s in codec for s in ("mp3", "mpeg", "flac", "vorbis", "ogg", "wav")
+            ):
+                stream = _av_stream_iter(self._url, title_cb=self._title_cb)
+                device = PlaybackDevice()
+                device.start(stream)
+                self.ready.emit(None, stream, device)
+                return
+
+            client = IceCastClient(self._url, update_stream_title=lambda c, t: self._title_cb(t))
+            fmt = client.audio_format
+
+            if fmt in _SUPPORTED_FORMATS:
+                stream = miniaudio.stream_any(
+                    client,
+                    source_format=fmt,
+                    output_format=SampleFormat.SIGNED16,
+                    nchannels=2,
+                    sample_rate=44100,
+                )
+                device = PlaybackDevice()
+                device.start(stream)
+                self.ready.emit(client, stream, device)
+            else:
+                client._stop_stream = True
+                try:
+                    stream = _av_stream_iter(self._url, title_cb=self._title_cb)
+                    device = PlaybackDevice()
+                    device.start(stream)
+                    self.ready.emit(None, stream, device)
+                except Exception as av_err:
+                    raise RuntimeError(
+                        f"Unsupported audio format (miniaudio: {fmt}, PyAV: {av_err})"
+                    )
         except Exception as e:
             self.error.emit(str(e))
 
@@ -61,12 +299,14 @@ class Player(QObject):
         super().__init__(parent)
         self._device: Optional[PlaybackDevice] = None
         self._client: Optional[IceCastClient] = None
+        self._stream_gen: Optional[object] = None
         self._current_url: Optional[str] = None
         self._playing = False
         self._volume = 100
         self._lock = Lock()
         self._worker: Optional[PlayWorker] = None
         self._play_seq = 0
+        self._shutdown_done = False
 
         self._poll = QTimer(self)
         self._poll.timeout.connect(self._poll_state)
@@ -79,15 +319,15 @@ class Player(QObject):
             self._playing = is_now
             self.state_changed.emit("playing" if is_now else "stopped")
 
-    def _on_stream_title(self, client, title: str):
+    def _on_stream_title(self, title: str):
         self.song_changed.emit(title)
 
     def get_station_info(self) -> dict:
         if not self._client:
             return {}
         return {
-            "icy-name": self._client.station_name,
-            "icy-genre": self._client.station_genre,
+            "icy-name": getattr(self._client, "station_name", ""),
+            "icy-genre": getattr(self._client, "station_genre", ""),
         }
 
     def set_proxy(self, proxy_url: Optional[str]):
@@ -105,17 +345,22 @@ class Player(QObject):
         with self._lock:
             seq = getattr(self.sender(), "_seq", -1) if self.sender() else -1
             if seq != self._play_seq:
-                client._stop_stream = True
+                if client is not None:
+                    client._stop_stream = True
                 return
             self._worker = None
             self._client = client
             self._stream = stream
             self._device = device
+            self._stream_gen = stream
             self._playing = True
             self.media_changed.emit(self._current_url or "")
             self.station_info_changed.emit(self.get_station_info())
+            name = client.station_name if client else ""
+            logger.info(f"Playing: {name or self._current_url}")
+            # Emit directly so "Now playing" notification fires reliably
+            # (_poll_state relies on a race with _device being set first)
             self.state_changed.emit("playing")
-            logger.info(f"Playing: {client.station_name}")
 
     def _on_play_error(self, msg: str):
         with self._lock:
@@ -128,13 +373,13 @@ class Player(QObject):
         logger.error(f"Play failed: {msg}")
         self.error_occurred.emit(msg)
 
-    def play(self, url: str):
+    def play(self, url: str, codec_hint: str = ""):
         with self._lock:
             self._cancel_worker()
             self._cleanup()
             self._current_url = url
             self._play_seq += 1
-            self._worker = PlayWorker(url, title_cb=self._on_stream_title)
+            self._worker = PlayWorker(url, codec_hint=codec_hint, title_cb=self._on_stream_title)
             self._worker._seq = self._play_seq
             self._worker.ready.connect(self._on_play_ready)
             self._worker.error.connect(self._on_play_error)
@@ -146,22 +391,42 @@ class Player(QObject):
             self._worker.ready.disconnect()
             self._worker.error.disconnect()
             self._worker.terminate()
-            self._worker.wait(2000)
+            if not self._worker.wait(3000):
+                self._worker.quit()
+                self._worker.wait(2000)
             self._worker.deleteLater()
-            self._worker = None
+        self._worker = None
 
     def _cleanup(self):
+        if self._stream_gen is not None:
+            try:
+                abort = getattr(self._stream_gen, "_abort", None)
+                if abort:
+                    abort()
+            except Exception:
+                pass
+            self._stream_gen = None
         if self._device:
             try:
-                self._device.stop()
+                t = threading.Thread(target=self._device.stop, daemon=True)
+                t.start()
+                t.join(2.0)
             except Exception:
                 pass
             self._device = None
-        if self._client:
+        if self._client is not None:
             self._client._stop_stream = True
             self._client = None
         self._stream = None
         self._playing = False
+
+    def shutdown(self):
+        if self._shutdown_done:
+            return
+        with self._lock:
+            self._shutdown_done = True
+            self._cancel_worker()
+            self._cleanup()
 
     def stop(self):
         with self._lock:
