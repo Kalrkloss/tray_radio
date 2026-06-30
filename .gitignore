@@ -3,6 +3,7 @@ __pycache__/
 logo_cache/
 config.json
 org.eclipse.import/
-dist/*
 *.spec
 build/
+*.wixpdb
+*.ico
