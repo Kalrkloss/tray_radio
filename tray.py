@@ -7,6 +7,10 @@ from typing import Optional, Callable
 import pystray
 from PIL import Image
 from pystray import Menu, MenuItem
+from win32com.propsys import propsys, pscon
+from win32com.shell import shell, shellcon
+import win32com.client
+import pythoncom
 
 from icon_generator import create_tray_icon, create_playing_icon, create_stopped_icon
 from playlist_manager import PlaylistManager
@@ -198,9 +202,6 @@ class TrayApp:
 
     def _register_aumid_shortcut(self):
         import tempfile
-        from win32com.propsys import propsys, pscon
-        from win32com.shell import shell, shellcon
-        import win32com.client, pythoncom
 
         startup_folder = os.path.join(
             os.environ.get("APPDATA", ""),
