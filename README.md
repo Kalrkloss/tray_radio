@@ -1,6 +1,6 @@
 # Tray Radio
 
-A Windows 11 system tray internet radio player. Plays MP3, AAC/AAC+, FLAC, OGG Vorbis, and WAV streams. Features a station browser, playlist management, autostart, and audio output device selection.
+A Windows 11 system tray internet radio player. Plays MP3, AAC/AAC+, FLAC, OGG Vorbis, and WAV streams. Features a station browser, playlist management, global media keys, commercial detection, autostart, and audio output device selection.
 
 ## Screenshots
 
@@ -15,14 +15,19 @@ A Windows 11 system tray internet radio player. Plays MP3, AAC/AAC+, FLAC, OGG V
 ## Features
 
 - **System tray operation** — runs silently in the notification area; right-click for menu
-- **Station Browser** — search [radio-browser.info](https://radio-browser.info) with codec filtering, parallel stream checking, quick preview
+- **Station Browser** — search [radio-browser.info](https://radio-browser.info) and curated local stations with codec filtering, parallel stream checking, quick preview, and pagination ("Load more")
+- **Commercial detection** — optional heuristic scan that checks redirect chains for ad domains and analyzes audio byte transitions for commercial-like patterns
 - **Playlist management** — multiple named playlists, drag-to-reorder, duplicate prevention by UUID
-- **Now Playing** — balloon notifications and tooltip showing current stream/song
+- **Now Playing** — silent toast notifications and tooltip showing current stream/song
 - **AAC/AAC+ support** — via PyAV decoding (no external codecs required)
 - **Output device selection** — choose your audio hardware (speakers, headphones, etc.)
+- **Global media keys** — Play/Pause, Stop, Next, Previous via keyboard media buttons
+- **Multi-catalog** — switch between radio-browser.info and a curated 160-station local catalog
 - **Auto-start** — launch at Windows login via registry
 - **Auto-play** — resume last stream on startup
 - **Proxy support** — auto-detects system proxy via WinHTTP API; uses PAC if configured
+- **Manual stream addition** — add custom streams by name and URL to any playlist
+- **Station name cleaning** — strips leading junk characters (`+`, `-`, `#`, etc.) from station names
 - **Single-file build** — self-contained `.exe`, no runtime dependencies
 
 ## Install
@@ -51,24 +56,36 @@ Run `Tray Radio.exe`. An icon appears in the system tray (near the clock). Right
 
 | Menu Item | Action |
 |---|---|
-| Browse Stations | Open the station browser to search and add stations |
-| Playlists | Submenu listing your playlists; click one to play it |
 | Playing: _station name_ | Currently playing stream (truncated to 64 chars) |
+| Play/Pause | Toggle playback |
+| Stop | Stop playback |
+| Playlists | Submenu listing your playlists; click to play |
+| Browse Stations | Open the station browser to search and add stations |
+| Add Stream… | Add a custom stream by name and URL |
+| Edit Playlists | Open the playlist editor |
 | Settings | Open settings dialog |
-| Search Stations | Quick search (reuses browser dialog) |
 | Quit | Exit the application |
 
 ### Station Browser
 
 1. Click **Browse Stations** in the tray menu
-2. Type a search term (e.g., "jazz", "bbc", "classical")
-3. Select a codec filter (All, MP3, AAC, FLAC, etc.) to narrow results
+2. Select a catalog (radio-browser.info or Curated Stations) from the dropdown
+3. Type a search term (e.g., "jazz", "bbc", "classical"), tag, or country
 4. Click **Search** — results are scanned in parallel for responsiveness
-5. Green-highlighted rows are reachable; grey rows are unreachable
-6. Double-click a row or select it and click **Preview** to test the stream
-7. Select a target playlist from the dropdown and click **Add** to save
+5. Responsive rows appear as they're found; check "Scan streams" to toggle
+6. Check **Check for commercials** to run additional commercial detection during scan
+7. Click **Load more…** to fetch the next page of results (up to 100 per page)
+8. Double-click a row or select it and click **Preview** to test the stream
+9. Select a target playlist from the dropdown and click **Add** to save
 
-The browser dialog persists between opens — your search results and terms are preserved.
+### Commercial Detection
+
+When "Check for commercials" is enabled during a stream scan, each stream is analyzed with two heuristics:
+
+- **Redirect analysis** — the URL's redirect chain is checked against a known ad-server domain list
+- **Audio transition analysis** — the first ~80 KB of stream data is divided into windows and RMS energy changes >4× between consecutive windows are counted; 2+ transitions suggest a commercial segue
+
+The result is displayed in a "Commercial" column as Yes/No/—. Both heuristics may produce false positives (station IDs, DJ talk) and false negatives (commercials without silence gaps).
 
 ### Playlists
 
@@ -86,13 +103,32 @@ The browser dialog persists between opens — your search results and terms are 
 | Audio Output | Select audio device from detected hardware; falls back to default if device is disconnected |
 | Scan Workers | Number of parallel threads for stream checking (higher = faster but more bandwidth) |
 
+### Global Media Keys
+
+The app installs a low-level keyboard hook (`WH_KEYBOARD_LL`) to intercept media keys globally, even when the app has no focused window:
+
+| Key | Action |
+|---|---|
+| Play/Pause (0xB3) | Toggle playback |
+| Stop (0xB2) | Stop playback |
+| Next Track (0xB0) | Skip to next stream in current playlist |
+| Previous Track (0xB1) | Go to previous stream in current playlist |
+
 ### Now Playing
 
-When a stream plays, a balloon notification displays the station name and current song (if provided by the stream). Hovering over the tray icon shows the info in a tooltip. The notification is silent (no sound).
+When a stream plays, a silent toast notification (via PowerShell XML toast with `<audio silent="true"/>`) displays the station name and current song. Falls back to pystray balloon notifications with `NIIF_NOSOUND` if PowerShell is unavailable. Hovering over the tray icon shows the info in a tooltip. Notifications auto-dismiss after 5 seconds.
 
 ### Audio Output
 
 In Settings, choose your audio device from the dropdown. The device name is saved in `config.json`. If the device is disconnected (e.g., USB headphones unplugged), playback falls back to the system default — the saved name stays ready for when the device reappears.
+
+### Manual Stream Addition
+
+Click **Add Stream…** in the tray menu to open a dialog where you can add any radio stream by name and URL. Select the target playlist from the dropdown. Duplicate prevention applies (same UUID cannot appear twice in a playlist). Manually added streams get a `manual-` prefixed UUID.
+
+### Station Name Cleaning
+
+Station names from radio-browser.info often include leading junk characters like `++++ ---- ####`. The app automatically strips these (along with `* = . _ ~ | >`) from names at the catalog level, so all displays and playlists show clean names.
 
 ## Build from Source
 
@@ -153,16 +189,20 @@ python main.py
 
 | File | Purpose |
 |---|---|
-| `main.py` | Application entry point, Qt app setup, tray <-> dialog wiring |
-| `tray.py` | System tray icon, menu, notifications, AUMID shortcut |
-| `player.py` | Audio playback: miniaudio + PyAV AAC fallback, device selection |
-| `proxy.py` | Proxy detection, auto-start registry, configuration |
-| `catalog.py` | radio-browser.info API client |
-| `scanner.py` | Parallel stream responsiveness checking with codec pre-filter |
-| `playlist_manager.py` | JSON playlist storage, duplicate prevention |
-| `icon_generator.py` | Station favicon fetch/cache, playing icon generation |
-| `ui/station_browser.py` | Station search/scan/preview/add dialog |
-| `ui/settings_dialog.py` | Settings dialog with audio device selection |
+| `main.py` | Application entry point, Qt app setup, tray <-> dialog wiring, media key dispatch, catalog probe |
+| `tray.py` | System tray icon, menu, notifications (silent toast + pystray fallback), AUMID shortcut |
+| `player.py` | Audio playback: miniaudio + PyAV AAC fallback, device selection, QThread lifecycle |
+| `proxy.py` | Proxy detection (WinHTTP + registry), auto-start registry, configuration persistence |
+| `catalog.py` | Multi-catalog system: radio-browser.info API + local curated stations, station name cleaning |
+| `scanner.py` | Parallel stream responsiveness checking, commercial detection (redirect + audio analysis) |
+| `notifier.py` | Silent toast notifier via persistent PowerShell process |
+| `media_keys.py` | Global media key handler via low-level keyboard hook |
+| `playlist_manager.py` | JSON playlist storage, duplicate prevention, next/prev navigation |
+| `icon_generator.py` | Station favicon fetch/cache, playing icon generation, .ico file creation |
+| `ui/station_browser.py` | Station search/scan/preview/add dialog with pagination |
+| `ui/settings_dialog.py` | Settings dialog with audio device selection, auto-play/auto-start toggles |
 | `ui/playlist_editor.py` | Playlist management dialog |
+| `ui/add_stream_dialog.py` | Manual stream addition dialog |
+| `ui/stream_info.py` | Stream info dialog showing current station/song |
 | `build.py` | PyInstaller + WiX MSI build script |
 | `installer.wxs` | WiX source for MSI installer |
