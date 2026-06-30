@@ -14,6 +14,7 @@ class StreamInfoDialog(QDialog):
     def __init__(self, stream: Stream, current_song: str = "", parent=None):
         super().__init__(parent)
         self.setWindowTitle("Now Playing")
+        self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         self.setMinimumWidth(350)
         self._stream = stream
         self._current_song = current_song

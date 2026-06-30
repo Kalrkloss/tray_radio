@@ -24,7 +24,7 @@ _PS_TOAST = (
 )
 
 _PS_TOAST_XML = (
-    '<toast duration="long" scenario="reminder">'
+    '<toast>'
     '<visual><binding template="ToastText02">'
     '<text id="1">{title}</text>'
     '<text id="2">{message}</text>'
@@ -49,7 +49,7 @@ class SilentToastNotifier:
                     ["powershell", "-NoProfile", "-Command", "-"],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
                     creationflags=0x08000000,
                 )
                 self._write(_PS_LOAD_TYPES)

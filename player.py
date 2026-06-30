@@ -277,11 +277,16 @@ class PlayWorker(QThread):
             socket.setdefaulttimeout(_STREAM_TIMEOUT)
             codec = self._codec_hint.lower() if self._codec_hint else ""
 
+            if self.isInterruptionRequested():
+                return
+
             # Skip IceCastClient entirely for codecs miniaudio can't handle
             if codec and not any(
                 s in codec for s in ("mp3", "mpeg", "flac", "vorbis", "ogg", "wav")
             ):
                 stream = _av_stream_iter(self._url, title_cb=self._title_cb)
+                if self.isInterruptionRequested():
+                    return
                 device = self._make_device()
                 device.start(stream)
                 self.ready.emit(None, stream, device)
@@ -289,6 +294,10 @@ class PlayWorker(QThread):
 
             client = IceCastClient(self._url, update_stream_title=lambda c, t: self._title_cb(t))
             fmt = client.audio_format
+
+            if self.isInterruptionRequested():
+                client._stop_stream = True
+                return
 
             if fmt in _SUPPORTED_FORMATS:
                 stream = miniaudio.stream_any(
@@ -305,6 +314,8 @@ class PlayWorker(QThread):
                 client._stop_stream = True
                 try:
                     stream = _av_stream_iter(self._url, title_cb=self._title_cb)
+                    if self.isInterruptionRequested():
+                        return
                     device = self._make_device()
                     device.start(stream)
                     self.ready.emit(None, stream, device)
@@ -382,6 +393,18 @@ class Player(QObject):
             if seq != self._play_seq:
                 if client is not None:
                     client._stop_stream = True
+                if device is not None:
+                    try:
+                        device.stop()
+                    except Exception:
+                        pass
+                if stream is not None:
+                    try:
+                        abort = getattr(stream, "_abort", None)
+                        if abort:
+                            abort()
+                    except Exception:
+                        pass
                 return
             # Worker's thread is done — deleteLater will fire via finished
             # connection (from play()).  Keeping self._worker past this point
@@ -420,7 +443,6 @@ class Player(QObject):
             self._worker._seq = self._play_seq
             self._worker.ready.connect(self._on_play_ready)
             self._worker.error.connect(self._on_play_error)
-            self._worker.finished.connect(self._worker.deleteLater)
             self._worker.start()
 
     def _cancel_worker(self):
@@ -429,15 +451,9 @@ class Player(QObject):
         w = self._worker
         self._worker = None
         try:
-            w.ready.disconnect()
-            w.error.disconnect()
-        except (TypeError, RuntimeError):
-            pass
-        try:
             if w.isRunning():
                 w.requestInterruption()
         except RuntimeError:
-            # C++ QObject already deleted by finished → deleteLater
             return
         # Always stash — prevents Python GC from destroying the C++ QThread
         # before the event loop processes its finished signal.
@@ -445,17 +461,6 @@ class Player(QObject):
 
     def _stash_worker(self, w: PlayWorker):
         self._old_workers.append(w)
-        w.finished.connect(lambda w=w: self._release_worker(w))
-
-    def _release_worker(self, w: PlayWorker):
-        try:
-            w.deleteLater()
-        except RuntimeError:
-            pass
-        try:
-            self._old_workers.remove(w)
-        except ValueError:
-            pass
 
     def _reap_zombies(self):
         alive = []

@@ -15,6 +15,8 @@ import pythoncom
 from icon_generator import create_tray_icon, create_playing_icon, create_stopped_icon
 from playlist_manager import PlaylistManager
 from notifier import SilentToastNotifier
+from ui.toast import ToastNotification
+from PyQt5.QtCore import QTimer
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,7 @@ class TrayApp:
         self._callbacks: dict[str, Callable] = {}
         self.cmd_queue: queue.Queue = queue.Queue()
         self._notifier = SilentToastNotifier()
+        self._current_toast = None
 
     def set_callbacks(self, callbacks: dict[str, Callable]):
         self._callbacks = callbacks
@@ -123,6 +126,11 @@ class TrayApp:
         ))
 
         items.append(Menu.SEPARATOR)
+
+        items.append(MenuItem(
+            "About",
+            lambda icon, item: self.cmd_queue.put(("show_about", [])),
+        ))
 
         items.append(MenuItem(
             "Quit",
@@ -241,21 +249,31 @@ class TrayApp:
             logger.warning("Could not set AUMID shortcut", exc_info=True)
 
     def notify(self, title: str, message: str):
-        if not self._icon:
-            return
-        self.dismiss_notification()
-        if self._notifier.notify(title, message):
-            return
         try:
-            self._icon._message(
-                1,    # NIM_MODIFY
-                16,   # NIF_INFO
-                szInfo=message,
-                szInfoTitle=title,
-                dwInfoFlags=0x11,
-            )
+            self._show_toast(title, message)
         except Exception:
-            pass
+            self.dismiss_notification()
+            if self._notifier.notify(title, message):
+                return
+            try:
+                self._icon._message(
+                    1, 16, szInfo=message, szInfoTitle=title, dwInfoFlags=0x01,
+                )
+            except Exception:
+                pass
+
+    def _show_toast(self, title: str, message: str):
+        if self._current_toast is not None:
+            try:
+                self._current_toast.close()
+            except RuntimeError:
+                pass
+        toast = ToastNotification(title, message)
+        toast.destroyed.connect(self._on_toast_closed)
+        self._current_toast = toast
+
+    def _on_toast_closed(self):
+        self._current_toast = None
 
     def dismiss_notification(self):
         if not self._icon:

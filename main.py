@@ -18,6 +18,7 @@ from ui.playlist_editor import PlaylistEditorDialog
 from ui.station_browser import StationBrowserDialog
 from ui.stream_info import StreamInfoDialog
 from ui.add_stream_dialog import AddStreamDialog
+from ui.about_dialog import AboutDialog
 from media_keys import MediaKeyHandler
 
 logging.basicConfig(
@@ -43,6 +44,7 @@ class TrayRadioApp:
         self._tray: TrayApp = None
         self._current_station: Stream = None
         self._current_song: str = ""
+        self._had_metadata: bool = False
         self._stream_info_dialog: StreamInfoDialog = None
         self._poll_timer: QTimer = None
         self._cached_proxy_url: Optional[str] = None
@@ -114,6 +116,7 @@ class TrayRadioApp:
             "show_playlist_editor": self._show_playlist_editor,
             "show_stream_info": self._show_stream_info,
             "add_manual_stream": self._add_manual_stream,
+            "show_about": self._show_about,
             "quit": self._quit,
         })
         self._tray.start()
@@ -145,6 +148,10 @@ class TrayRadioApp:
     def _on_player_state(self, state: str):
         is_playing = state == "playing"
         self._tray.update_playing_state(is_playing)
+        if is_playing and self._current_station and not self._had_metadata:
+            self._tray.notify(self._current_station.name, "")
+        if not is_playing:
+            self._had_metadata = False
 
     def _on_player_error(self, msg: str):
         logger.error(f"Player error: {msg}")
@@ -153,6 +160,7 @@ class TrayRadioApp:
 
     def _on_song_change(self, song: str):
         self._current_song = song
+        self._had_metadata = True
         self._tray.update_song(song)
         if self._current_station:
             self._tray.notify(self._current_station.name, song)
@@ -184,6 +192,7 @@ class TrayRadioApp:
 
     def _play_stream(self, stream: Stream):
         self._current_station = stream
+        self._had_metadata = False
         self._pm.set_current_stream(stream.uuid)
         url = stream.url_resolved or stream.url
         self._apply_proxy_for_url(url)
@@ -198,6 +207,9 @@ class TrayRadioApp:
         self._player.play(url, codec_hint=codec, output_device=self._proxy_config.output_device)
         self._tray.update_station_info(name, "")
         self._tray.update_playing_state(True)
+
+    def _show_about(self):
+        AboutDialog.show_modal()
 
     def _show_settings(self):
         dialog = SettingsDialog(self._proxy_config)
@@ -250,8 +262,16 @@ class TrayRadioApp:
 
     def _show_stream_info(self):
         if self._current_station:
+            if self._stream_info_dialog is not None and self._stream_info_dialog.isVisible():
+                self._stream_info_dialog.raise_()
+                self._stream_info_dialog.activateWindow()
+                self._stream_info_dialog.update_song(self._current_song)
+                return
             self._stream_info_dialog = StreamInfoDialog(
                 self._current_station, self._current_song
+            )
+            self._stream_info_dialog.finished.connect(
+                lambda: setattr(self, "_stream_info_dialog", None)
             )
             self._stream_info_dialog.show()
 
