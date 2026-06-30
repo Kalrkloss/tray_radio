@@ -54,3 +54,22 @@ print("Running PyInstaller...")
 print(" ".join(args))
 subprocess.run(args, check=True)
 print(f"\nDone! Executable in: {os.path.join(DIST_DIR, 'Tray Radio.exe')}")
+
+# Step 2: Build MSI with WiX
+MSI_SRC = os.path.join(os.path.dirname(__file__), "installer.wxs")
+MSI_OUT = os.path.join(DIST_DIR, "Tray Radio.msi")
+
+if os.path.exists(MSI_SRC):
+    print("\nBuilding MSI with WiX...")
+    wix_args = [
+        "wix", "build",
+        MSI_SRC,
+        "-o", MSI_OUT,
+        "-arch", "x64",
+        "-acceptEula", "wix7",
+    ]
+    print(" ".join(wix_args))
+    subprocess.run(wix_args, check=True)
+    print(f"\nDone! MSI in: {MSI_OUT}")
+else:
+    print(f"\nSkipping MSI: {MSI_SRC} not found")

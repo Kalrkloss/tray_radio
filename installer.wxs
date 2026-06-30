@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Tray Radio"
+    Manufacturer="Tray Radio"
+    Version="1.0.0"
+    UpgradeCode="72D5B0B6-D478-45C0-BCCA-043CE0D0CD88"
+    Scope="perMachine"
+    Language="1033">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <Icon Id="app.ico" SourceFile="dist\tray_radio.ico" />
+
+    <Property Id="ARPPRODUCTICON" Value="app.ico" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/HermanF/tray_radio" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="Main" Title="Tray Radio" Level="1">
+      <ComponentRef Id="AppExe" />
+      <ComponentRef Id="AppDataDir" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLDIR" Name="Tray Radio">
+        <Component Id="AppExe" Guid="BE5CB4DC-D00A-4C88-A0FD-21A05A5343C7" Bitness="always64">
+          <File Id="TrayRadioExe" Source="dist\Tray Radio.exe" KeyPath="yes" />
+          <File Id="TrayRadioIco" Source="dist\tray_radio.ico" />
+          <Shortcut
+            Id="StartMenuShortcut"
+            Directory="ProgramMenuFolder"
+            Name="Tray Radio"
+            Description="System tray internet radio player"
+            Target="[#TrayRadioExe]"
+            Icon="app.ico"
+            Show="minimized" />
+          <Shortcut
+            Id="DesktopShortcut"
+            Directory="DesktopFolder"
+            Name="Tray Radio"
+            Description="System tray internet radio player"
+            Target="[#TrayRadioExe]"
+            Icon="app.ico"
+            Show="minimized" />
+          <RemoveFolder Id="RemoveInstallDir" On="uninstall" />
+          <RegistryValue Root="HKMU" Key="Software\Tray Radio" Name="installed" Type="integer" Value="1" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="AppDataFolder">
+      <Directory Id="TrayRadioAppData" Name="tray_radio">
+        <Component Id="AppDataDir" Guid="73EEB51A-F21C-4D74-8DDF-403967A70B81" Bitness="always64">
+          <CreateFolder />
+          <RemoveFolder Id="RemoveAppDataDir" On="uninstall" />
+          <RegistryValue Root="HKMU" Key="Software\Tray Radio" Name="appdata" Type="integer" Value="1" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+  </Package>
+</Wix>
