@@ -1,6 +1,6 @@
 # Tray Radio
 
-A Windows 11 system tray internet radio player. Plays MP3, AAC/AAC+, FLAC, OGG Vorbis, and WAV streams. Features a station browser, playlist management, global media keys, commercial detection, autostart, and audio output device selection.
+A Windows 11 system tray internet radio player. Plays MP3, AAC/AAC+, FLAC, OGG Vorbis, and WAV streams. Features a station browser, playlist management, global media keys, commercial detection, autostart, audio output device selection, and custom popup notifications.
 
 ## Screenshots
 
@@ -18,13 +18,15 @@ A Windows 11 system tray internet radio player. Plays MP3, AAC/AAC+, FLAC, OGG V
 - **Station Browser** — search [radio-browser.info](https://radio-browser.info) and curated local stations with codec filtering, parallel stream checking, quick preview, and pagination ("Load more")
 - **Commercial detection** — optional heuristic scan that checks redirect chains for ad domains and analyzes audio byte transitions for commercial-like patterns
 - **Playlist management** — multiple named playlists, drag-to-reorder, duplicate prevention by UUID
-- **Now Playing** — silent toast notifications and tooltip showing current stream/song
+- **Custom popup notifications** — frameless Qt toast popup (no Windows Action Center storage) with fade animation; song title or station name on connect
 - **AAC/AAC+ support** — via PyAV decoding (no external codecs required)
+- **FLAC container fallback** — PyAV `av.open()` handles OGG-encapsulated FLAC streams when miniaudio decoder fails
 - **Output device selection** — choose your audio hardware (speakers, headphones, etc.)
 - **Global media keys** — Play/Pause, Stop, Next, Previous via keyboard media buttons
 - **Multi-catalog** — switch between radio-browser.info and a curated 160-station local catalog
 - **Auto-start** — launch at Windows login via registry
-- **Auto-play** — resume last stream on startup
+- **Auto-play** — resume last stream on startup (playlist or preview)
+- **Last stream persistence** — the last played stream is restored on restart, whether selected from a playlist or previewed from search results
 - **Proxy support** — auto-detects system proxy via WinHTTP API; uses PAC if configured
 - **Manual stream addition** — add custom streams by name and URL to any playlist
 - **Station name cleaning** — strips leading junk characters (`+`, `-`, `#`, etc.) from station names
@@ -34,7 +36,7 @@ A Windows 11 system tray internet radio player. Plays MP3, AAC/AAC+, FLAC, OGG V
 
 ### MSI Installer (recommended)
 
-Download `Tray Radio.msi` from the [Releases](https://github.com/HermanF/tray_radio/releases) page. The installer:
+Download `Tray Radio.msi` from the [Releases](https://github.com/Kalrkloss/tray_radio/releases) page. The installer:
 
 - Installs to `Program Files\Tray Radio`
 - Creates Start Menu and Desktop shortcuts
@@ -44,7 +46,7 @@ Download `Tray Radio.msi` from the [Releases](https://github.com/HermanF/tray_ra
 
 ### Portable EXE
 
-Download `Tray Radio.exe` from the [Releases](https://github.com/HermanF/tray_radio/releases) page. Run it directly — no installation needed. Configuration is stored in `%APPDATA%\tray_radio\`.
+Download `Tray Radio.exe` from the [Releases](https://github.com/Kalrkloss/tray_radio/releases) page. Run it directly — no installation needed. Configuration is stored in `%APPDATA%\tray_radio\`.
 
 ## How to Use
 
@@ -64,6 +66,7 @@ Run `Tray Radio.exe`. An icon appears in the system tray (near the clock). Right
 | Add Stream… | Add a custom stream by name and URL |
 | Edit Playlists | Open the playlist editor |
 | Settings | Open settings dialog |
+| About | Program info and GitHub link |
 | Quit | Exit the application |
 
 ### Station Browser
@@ -116,7 +119,9 @@ The app installs a low-level keyboard hook (`WH_KEYBOARD_LL`) to intercept media
 
 ### Now Playing
 
-When a stream plays, a silent toast notification (via PowerShell XML toast with `<audio silent="true"/>`) displays the station name and current song. Falls back to pystray balloon notifications with `NIIF_NOSOUND` if PowerShell is unavailable. Hovering over the tray icon shows the info in a tooltip. Notifications auto-dismiss after 5 seconds.
+When a stream plays, a custom frameless Qt popup notification fades in at the bottom-right of the screen, displaying the station name and current song. The popup auto-dismisses after 6 seconds and can be dismissed immediately by clicking it. Unlike standard Windows toasts, this popup does not appear in the Action Center. Falls back to PowerShell silent toast and pystray balloon notification if the Qt popup fails. Hovering over the tray icon shows the info in a tooltip.
+
+When no song metadata is available (e.g., raw stream without ICY tags), the popup shows the station name instead. If song metadata arrives shortly after playback starts, the station name popup is replaced seamlessly.
 
 ### Audio Output
 
@@ -141,7 +146,7 @@ Station names from radio-browser.info often include leading junk characters like
 ### Setup
 
 ```powershell
-git clone https://github.com/HermanF/tray_radio.git
+git clone https://github.com/Kalrkloss/tray_radio.git
 cd tray_radio
 pip install -r requirements.txt
 ```
@@ -177,7 +182,7 @@ python main.py
 - [PyQt5](https://pypi.org/project/PyQt5/) — UI dialogs
 - [pystray](https://pypi.org/project/pystray/) — system tray icon and menu
 - [miniaudio](https://pypi.org/project/miniaudio/) — audio playback (MP3, FLAC, OGG, WAV)
-- [av](https://pypi.org/project/av/) — AAC/AAC+ decoding (PyAV 17.1.0+)
+- [av](https://pypi.org/project/av/) — AAC/AAC+ decoding, OGG container demuxing, FLAC fallback (PyAV 17.1.0+)
 - [pywin32](https://pypi.org/project/pywin32/) — Windows shell integration, AUMID, notifications
 - [Pillow](https://pypi.org/project/Pillow/) — icon generation and image processing
 - [pypac](https://pypi.org/project/pypac/) — PAC proxy resolution
@@ -191,18 +196,20 @@ python main.py
 |---|---|
 | `main.py` | Application entry point, Qt app setup, tray <-> dialog wiring, media key dispatch, catalog probe |
 | `tray.py` | System tray icon, menu, notifications (silent toast + pystray fallback), AUMID shortcut |
-| `player.py` | Audio playback: miniaudio + PyAV AAC fallback, device selection, QThread lifecycle |
+| `player.py` | Audio playback: miniaudio + PyAV fallback (AAC, FLAC, containers), device selection, QThread lifecycle |
 | `proxy.py` | Proxy detection (WinHTTP + registry), auto-start registry, configuration persistence |
 | `catalog.py` | Multi-catalog system: radio-browser.info API + local curated stations, station name cleaning |
 | `scanner.py` | Parallel stream responsiveness checking, commercial detection (redirect + audio analysis) |
-| `notifier.py` | Silent toast notifier via persistent PowerShell process |
+| `notifier.py` | Silent toast notifier via persistent PowerShell process (fallback) |
 | `media_keys.py` | Global media key handler via low-level keyboard hook |
-| `playlist_manager.py` | JSON playlist storage, duplicate prevention, next/prev navigation |
+| `playlist_manager.py` | JSON playlist storage, duplicate prevention, next/prev navigation, preview stream fallback |
 | `icon_generator.py` | Station favicon fetch/cache, playing icon generation, .ico file creation |
 | `ui/station_browser.py` | Station search/scan/preview/add dialog with pagination |
 | `ui/settings_dialog.py` | Settings dialog with audio device selection, auto-play/auto-start toggles |
 | `ui/playlist_editor.py` | Playlist management dialog |
 | `ui/add_stream_dialog.py` | Manual stream addition dialog |
 | `ui/stream_info.py` | Stream info dialog showing current station/song |
+| `ui/toast.py` | Custom frameless Qt toast notification popup (no Action Center) |
+| `ui/about_dialog.py` | About dialog with GitHub link and version info |
 | `build.py` | PyInstaller + WiX MSI build script |
 | `installer.wxs` | WiX source for MSI installer |

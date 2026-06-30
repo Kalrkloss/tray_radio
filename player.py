@@ -257,6 +257,68 @@ def _av_stream_iter(url: str, title_cb: Callable = None):
     return _AvStreamWrapper()
 
 
+def _av_container_stream(url: str, title_cb: Callable = None):
+    import av
+    import numpy as np
+
+    container = av.open(url, timeout=30)
+    resampler = av.AudioResampler(
+        format="s16",
+        layout="stereo",
+        rate=44100,
+    )
+
+    _abort = threading.Event()
+    pcm_buf = b""
+
+    def abort():
+        _abort.set()
+        try:
+            container.close()
+        except Exception:
+            pass
+
+    def gen():
+        nonlocal pcm_buf
+        want_frames = yield
+        while True:
+            if not _abort.is_set() and len(pcm_buf) < 131072:
+                try:
+                    for packet in container.demux():
+                        if _abort.is_set():
+                            break
+                        for frame in packet.decode():
+                            for out in resampler.resample(frame):
+                                pcm_buf += out.to_ndarray().tobytes()
+                            if len(pcm_buf) >= 131072:
+                                break
+                        if len(pcm_buf) >= 131072:
+                            break
+                except Exception:
+                    pass
+
+            if want_frames is None:
+                want_frames = 2048
+            need = want_frames * 4
+            if len(pcm_buf) >= need:
+                out = pcm_buf[:need]
+                pcm_buf = pcm_buf[need:]
+            else:
+                out = pcm_buf
+                pcm_buf = b""
+            want_frames = yield out
+            if not out and _abort.is_set():
+                return
+
+    wrapper = type("_AvContainerWrapper", (), {})()
+    wrapper._gen = gen()
+    wrapper._abort = abort
+    wrapper.send = wrapper._gen.send
+    wrapper.__next__ = lambda: next(wrapper._gen)
+    next(wrapper._gen)
+    return wrapper
+
+
 class PlayWorker(QThread):
     ready = pyqtSignal(object, object, object)
     error = pyqtSignal(str)
@@ -300,15 +362,29 @@ class PlayWorker(QThread):
                 return
 
             if fmt in _SUPPORTED_FORMATS:
-                stream = miniaudio.stream_any(
-                    client,
-                    source_format=fmt,
-                    output_format=SampleFormat.SIGNED16,
-                    nchannels=2,
-                    sample_rate=44100,
-                )
-                device = self._make_device()
-                device.start(stream)
+                try:
+                    stream = miniaudio.stream_any(
+                        client,
+                        source_format=fmt,
+                        output_format=SampleFormat.SIGNED16,
+                        nchannels=2,
+                        sample_rate=44100,
+                    )
+                    device = self._make_device()
+                    device.start(stream)
+                except Exception:
+                    if client is not None:
+                        client._stop_stream = True
+                    try:
+                        stream = _av_container_stream(self._url, title_cb=self._title_cb)
+                    except Exception:
+                        stream = _av_stream_iter(self._url, title_cb=self._title_cb)
+                    if self.isInterruptionRequested():
+                        return
+                    device = self._make_device()
+                    device.start(stream)
+                    self.ready.emit(None, stream, device)
+                    return
                 self.ready.emit(client, stream, device)
             else:
                 client._stop_stream = True
