@@ -20,6 +20,7 @@ from ui.stream_info import StreamInfoDialog
 from ui.add_stream_dialog import AddStreamDialog
 from ui.about_dialog import AboutDialog
 from media_keys import MediaKeyHandler
+from pls_resolver import is_pls_url, resolve_pls_url
 
 logging.basicConfig(
     level=logging.INFO,
@@ -205,6 +206,12 @@ class TrayRadioApp:
         self._tray.notify(stream.name, "")
 
     def open_preview(self, name: str, url: str, codec: str = ""):
+        if is_pls_url(url):
+            pls = resolve_pls_url(url)
+            if pls and pls.get("url"):
+                url = pls["url"]
+                if pls.get("name") and not name:
+                    name = pls["name"]
         self._current_station = Stream(uuid="__preview__", name=name, url=url, codec=codec)
         self._had_metadata = False
         self._pm.set_current_stream("__preview__")

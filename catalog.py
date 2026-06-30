@@ -8,6 +8,8 @@ from typing import Optional
 
 import requests
 
+from pls_resolver import is_pls_url, resolve_pls_url
+
 logger = logging.getLogger(__name__)
 
 _MEIPASS = getattr(sys, '_MEIPASS', None)
@@ -125,11 +127,17 @@ class RadioBrowserCatalog(CatalogBase):
             pass
 
     def station_to_stream(self, data: dict) -> dict:
+        url = data.get("url", "")
+        url_resolved = data.get("url_resolved", "")
+        if not url_resolved and is_pls_url(url):
+            pls = resolve_pls_url(url, self.session, timeout=5)
+            if pls and pls.get("url"):
+                url_resolved = pls["url"]
         return {
             "uuid": data.get("stationuuid", ""),
             "name": _clean_name(data.get("name", "")),
-            "url": data.get("url", ""),
-            "url_resolved": data.get("url_resolved", ""),
+            "url": url,
+            "url_resolved": url_resolved,
             "homepage": data.get("homepage", ""),
             "favicon": data.get("favicon", ""),
             "tags": data.get("tags", ""),
@@ -195,11 +203,17 @@ class LocalCatalog(CatalogBase):
         return results[offset:offset + limit]
 
     def station_to_stream(self, data: dict) -> dict:
+        url = data.get("url", "")
+        url_resolved = data.get("url_resolved", "")
+        if not url_resolved and is_pls_url(url):
+            pls = resolve_pls_url(url, timeout=5)
+            if pls and pls.get("url"):
+                url_resolved = pls["url"]
         return {
             "uuid": data.get("uuid", ""),
             "name": _clean_name(data.get("name", "")),
-            "url": data.get("url", ""),
-            "url_resolved": data.get("url_resolved", ""),
+            "url": url,
+            "url_resolved": url_resolved,
             "homepage": data.get("homepage", ""),
             "favicon": data.get("favicon", ""),
             "tags": data.get("tags", ""),

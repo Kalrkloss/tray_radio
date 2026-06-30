@@ -1,12 +1,15 @@
+import threading
 import uuid
+from urllib.parse import urlparse
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QComboBox, QFormLayout, QMessageBox,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 
 from playlist_manager import PlaylistManager, Stream
+from pls_resolver import is_pls_url, resolve_pls_url
 
 
 class AddStreamDialog(QDialog):
@@ -28,6 +31,7 @@ class AddStreamDialog(QDialog):
 
         self._url_edit = QLineEdit()
         self._url_edit.setPlaceholderText("e.g. https://example.com/stream.mp3")
+        self._url_edit.textChanged.connect(self._on_url_changed)
         form.addRow("URL:", self._url_edit)
 
         layout.addLayout(form)
@@ -51,6 +55,32 @@ class AddStreamDialog(QDialog):
         btn_layout.addWidget(ok_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
+
+    def _on_url_changed(self, text: str):
+        if is_pls_url(text):
+            QTimer.singleShot(300, lambda: self._auto_resolve(text))
+
+    def _auto_resolve(self, url: str):
+        if self._url_edit.text().strip() != url:
+            return
+        if self._name_edit.text().strip():
+            return
+        self._url_edit.setEnabled(False)
+        self._url_edit.setPlaceholderText("Resolving PLS...")
+        t = threading.Thread(target=self._resolve_pls, args=(url,), daemon=True)
+        t.start()
+
+    def _resolve_pls(self, url: str):
+        result = resolve_pls_url(url)
+        QTimer.singleShot(0, lambda: self._on_pls_resolved(result))
+
+    def _on_pls_resolved(self, result):
+        self._url_edit.setEnabled(True)
+        self._url_edit.setPlaceholderText("e.g. https://example.com/stream.mp3")
+        if result and result.get("url"):
+            self._url_edit.setText(result["url"])
+            if result.get("name") and not self._name_edit.text().strip():
+                self._name_edit.setText(result["name"])
 
     def _refresh_playlist_combo(self):
         self._playlist_combo.clear()

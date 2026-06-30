@@ -3,6 +3,8 @@ import socket
 import ssl
 import threading
 import urllib.request
+
+from pls_resolver import is_pls_url, resolve_pls_url
 from typing import Optional, Callable
 from threading import Lock
 
@@ -81,7 +83,28 @@ def _av_stream_iter(url: str, title_cb: Callable = None):
     import numpy as np
     from queue import Queue
 
-    resp = urllib.request.urlopen(url)
+    from pls_resolver import is_pls_url, resolve_pls_url
+
+    if is_pls_url(url):
+        pls = resolve_pls_url(url, timeout=_STREAM_TIMEOUT)
+        if pls and pls.get("url"):
+            url = pls["url"]
+
+    req = urllib.request.Request(url, headers={"Icy-MetaData": "1"})
+    resp = urllib.request.urlopen(req, timeout=_STREAM_TIMEOUT)
+    ct = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+    if ct == "audio/x-scpls":
+        content = resp.read().decode("utf-8", errors="replace")
+        resp.close()
+        from pls_resolver import parse_pls
+        pls = parse_pls(content)
+        if pls and pls.get("url"):
+            url = pls["url"]
+            req = urllib.request.Request(url, headers={"Icy-MetaData": "1"})
+            resp = urllib.request.urlopen(req, timeout=_STREAM_TIMEOUT)
+            ct = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+        else:
+            raise RuntimeError("PLS content-type but failed to parse")
     icy_metaint = int(resp.headers.get("icy-metaint", 0))
 
     # Detect codec from Content-Type
@@ -510,6 +533,10 @@ class Player(QObject):
         self.error_occurred.emit(msg)
 
     def play(self, url: str, codec_hint: str = "", output_device: str = ""):
+        if is_pls_url(url):
+            pls = resolve_pls_url(url, timeout=_STREAM_TIMEOUT)
+            if pls and pls.get("url"):
+                url = pls["url"]
         with self._lock:
             self._cancel_worker()
             self._cleanup()

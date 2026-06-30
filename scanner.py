@@ -4,10 +4,12 @@ from typing import Optional, Callable
 
 import requests
 
+from pls_resolver import is_pls_url, resolve_pls_url
+
 logger = logging.getLogger(__name__)
 
 
-_KNOWN_BAD_CT = {"text/html", "text/plain", "application/xml", "text/xml"}
+_KNOWN_BAD_CT = {"text/html", "text/plain", "application/xml", "text/xml", "audio/x-scpls"}
 _SUPPORTED_CODECS = {"mp3", "mpeg", "ogg", "vorbis", "flac", "wav", "aac", "aac+"}
 
 _KNOWN_AD_DOMAINS = {
@@ -106,6 +108,15 @@ def _check_stream(
     url = station.get("url_resolved") or station.get("url", "")
     if not url:
         return result
+    if is_pls_url(url):
+        pls = resolve_pls_url(url, session, timeout=5)
+        if pls and pls.get("url"):
+            station["url_resolved"] = pls["url"]
+            url = pls["url"]
+            if pls.get("name") and not station.get("name"):
+                station["name"] = pls["name"]
+        else:
+            return result
     try:
         resp = session.get(
             url,
@@ -115,6 +126,28 @@ def _check_stream(
         )
         if resp.status_code in (200, 206):
             ct = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+            if ct == "audio/x-scpls":
+                content = resp.content.decode("utf-8", errors="replace")
+                resp.close()
+                from pls_resolver import parse_pls
+                pls = parse_pls(content)
+                if pls and pls.get("url"):
+                    station["url_resolved"] = pls["url"]
+                    url = pls["url"]
+                    if pls.get("name") and not station.get("name"):
+                        station["name"] = pls["name"]
+                    resp = session.get(
+                        url,
+                        stream=True,
+                        timeout=5,
+                        headers={"User-Agent": "TrayRadio/1.0"},
+                    )
+                    if resp.status_code not in (200, 206):
+                        resp.close()
+                        return result
+                    ct = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+                else:
+                    return result
             if ct and ct not in _KNOWN_BAD_CT:
                 chunk = resp.raw.read(1024)
                 if chunk:
