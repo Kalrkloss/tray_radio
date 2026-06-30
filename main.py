@@ -17,6 +17,7 @@ from ui.settings_dialog import SettingsDialog
 from ui.playlist_editor import PlaylistEditorDialog
 from ui.station_browser import StationBrowserDialog
 from ui.stream_info import StreamInfoDialog
+from ui.add_stream_dialog import AddStreamDialog
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,6 +112,7 @@ class TrayRadioApp:
             "show_station_browser": self._show_station_browser,
             "show_playlist_editor": self._show_playlist_editor,
             "show_stream_info": self._show_stream_info,
+            "add_manual_stream": self._add_manual_stream,
             "quit": self._quit,
         })
         self._tray.start()
@@ -223,6 +225,11 @@ class TrayRadioApp:
     def _show_playlist_editor(self):
         dialog = PlaylistEditorDialog(self._pm)
         dialog.exec_()
+
+    def _add_manual_stream(self):
+        dialog = AddStreamDialog(self._pm)
+        if dialog.exec_() == AddStreamDialog.Accepted:
+            self._tray._refresh()
 
     def _show_stream_info(self):
         if self._current_station:

@@ -105,6 +105,11 @@ class TrayApp:
         ))
 
         items.append(MenuItem(
+            "Add Stream…",
+            lambda icon, item: self.cmd_queue.put(("add_manual_stream", [])),
+        ))
+
+        items.append(MenuItem(
             "Edit Playlists",
             lambda icon, item: self.cmd_queue.put(("show_playlist_editor", [])),
         ))
@@ -239,7 +244,13 @@ class TrayApp:
             return
         self.dismiss_notification()
         try:
-            self._icon.notify(title, message)
+            self._icon._message(
+                1,    # NIM_MODIFY
+                16,   # NIF_INFO
+                szInfo=message,
+                szInfoTitle=title,
+                dwInfoFlags=0x11,  # NIIF_INFO | NIIF_NOSOUND
+            )
         except Exception:
             pass
 
