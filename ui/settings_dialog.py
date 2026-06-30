@@ -1,18 +1,19 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QSpinBox,
     QRadioButton, QButtonGroup, QPushButton, QGroupBox, QFormLayout,
-    QCheckBox, QMessageBox,
+    QCheckBox, QComboBox,
 )
 from PyQt5.QtCore import Qt
 
 from proxy import ProxyConfig, detect_system_proxy, get_system_pac_url, get_system_auto_detect, set_auto_start
+from player import get_output_devices
 
 
 class SettingsDialog(QDialog):
     def __init__(self, proxy_config: ProxyConfig, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Proxy Settings")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(450)
         self._proxy_config = proxy_config
         self._build_ui()
         self._load_config()
@@ -88,6 +89,14 @@ class SettingsDialog(QDialog):
         scan_layout.addRow("Workers:", self._workers_spin)
         layout.addWidget(scan_group)
 
+        audio_group = QGroupBox("Audio Output")
+        audio_layout = QFormLayout(audio_group)
+        self._device_combo = QComboBox()
+        self._device_combo.setToolTip("Select the audio output device")
+        self._populate_devices()
+        audio_layout.addRow("Device:", self._device_combo)
+        layout.addWidget(audio_group)
+
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         ok_btn = QPushButton("OK")
@@ -97,6 +106,19 @@ class SettingsDialog(QDialog):
         btn_layout.addWidget(ok_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
+
+    def _populate_devices(self):
+        self._device_combo.clear()
+        self._device_combo.addItem("(System Default)", "")
+        selected = self._proxy_config.output_device
+        for d in get_output_devices():
+            name = d["name"]
+            if name == "(System Default)":
+                continue
+            self._device_combo.addItem(name, name)
+        idx = self._device_combo.findData(selected)
+        if idx >= 0:
+            self._device_combo.setCurrentIndex(idx)
 
     def _load_config(self):
         mode_map = {"off": 0, "system": 1, "manual": 2}
@@ -139,6 +161,7 @@ class SettingsDialog(QDialog):
         self._proxy_config.workers = self._workers_spin.value()
         self._proxy_config.auto_play = self._auto_play_cb.isChecked()
         self._proxy_config.auto_start = self._auto_start_cb.isChecked()
+        self._proxy_config.output_device = self._device_combo.currentData()
         set_auto_start(self._proxy_config.auto_start)
         self.accept()
 

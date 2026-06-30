@@ -8,6 +8,28 @@ from threading import Lock
 import miniaudio
 from miniaudio import FileFormat, SampleFormat, PlaybackDevice, IceCastClient
 
+
+def get_output_devices() -> list[dict]:
+    devices = [{"name": "(System Default)", "id": None}]
+    try:
+        for d in miniaudio.Devices().get_playbacks():
+            devices.append({"name": d["name"], "id": d["id"]})
+    except Exception:
+        pass
+    return devices
+
+
+def find_device_id(name: str):
+    if not name:
+        return None
+    try:
+        for d in miniaudio.Devices().get_playbacks():
+            if d["name"] == name:
+                return d["id"]
+    except Exception:
+        pass
+    return None
+
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QThread
 
 logger = logging.getLogger(__name__)
@@ -238,11 +260,16 @@ class PlayWorker(QThread):
     ready = pyqtSignal(object, object, object)
     error = pyqtSignal(str)
 
-    def __init__(self, url: str, codec_hint: str = "", title_cb=None):
+    def __init__(self, url: str, codec_hint: str = "", title_cb=None, device_name: str = ""):
         super().__init__()
         self._url = url
         self._codec_hint = codec_hint
         self._title_cb = title_cb
+        self._device_name = device_name
+
+    def _make_device(self):
+        device_id = find_device_id(self._device_name)
+        return PlaybackDevice(device_id=device_id)
 
     def run(self):
         try:
@@ -254,7 +281,7 @@ class PlayWorker(QThread):
                 s in codec for s in ("mp3", "mpeg", "flac", "vorbis", "ogg", "wav")
             ):
                 stream = _av_stream_iter(self._url, title_cb=self._title_cb)
-                device = PlaybackDevice()
+                device = self._make_device()
                 device.start(stream)
                 self.ready.emit(None, stream, device)
                 return
@@ -270,14 +297,14 @@ class PlayWorker(QThread):
                     nchannels=2,
                     sample_rate=44100,
                 )
-                device = PlaybackDevice()
+                device = self._make_device()
                 device.start(stream)
                 self.ready.emit(client, stream, device)
             else:
                 client._stop_stream = True
                 try:
                     stream = _av_stream_iter(self._url, title_cb=self._title_cb)
-                    device = PlaybackDevice()
+                    device = self._make_device()
                     device.start(stream)
                     self.ready.emit(None, stream, device)
                 except Exception as av_err:
@@ -373,13 +400,13 @@ class Player(QObject):
         logger.error(f"Play failed: {msg}")
         self.error_occurred.emit(msg)
 
-    def play(self, url: str, codec_hint: str = ""):
+    def play(self, url: str, codec_hint: str = "", output_device: str = ""):
         with self._lock:
             self._cancel_worker()
             self._cleanup()
             self._current_url = url
             self._play_seq += 1
-            self._worker = PlayWorker(url, codec_hint=codec_hint, title_cb=self._on_stream_title)
+            self._worker = PlayWorker(url, codec_hint=codec_hint, title_cb=self._on_stream_title, device_name=output_device)
             self._worker._seq = self._play_seq
             self._worker.ready.connect(self._on_play_ready)
             self._worker.error.connect(self._on_play_error)

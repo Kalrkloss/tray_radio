@@ -188,7 +188,7 @@ class TrayRadioApp:
         self._apply_proxy_for_url(url)
         self._set_station_icon(stream.favicon)
         self._tray.notify(stream.name, "Connecting…")
-        self._player.play(url, codec_hint=stream.codec)
+        self._player.play(url, codec_hint=stream.codec, output_device=self._proxy_config.output_device)
         self._tray.update_station_info(stream.name, "")
         self._tray.update_playing_state(True)
 
@@ -196,7 +196,7 @@ class TrayRadioApp:
         self._current_station = Stream(uuid="", name=name, url=url, codec=codec)
         self._apply_proxy_for_url(url)
         self._tray.notify(name, "Connecting…")
-        self._player.play(url, codec_hint=codec)
+        self._player.play(url, codec_hint=codec, output_device=self._proxy_config.output_device)
         self._tray.update_station_info(name, "")
         self._tray.update_playing_state(True)
 

@@ -44,6 +44,7 @@ class ProxyConfig:
     workers: int = 5
     auto_play: bool = True
     auto_start: bool = False
+    output_device: str = ""
 
     def to_dict(self):
         return {
@@ -55,6 +56,7 @@ class ProxyConfig:
             "workers": self.workers,
             "auto_play": self.auto_play,
             "auto_start": self.auto_start,
+            "output_device": self.output_device,
         }
 
     @classmethod
@@ -68,6 +70,7 @@ class ProxyConfig:
             workers=data.get("workers", 5),
             auto_play=data.get("auto_play", True),
             auto_start=data.get("auto_start", False),
+            output_device=data.get("output_device", ""),
         )
 
     def get_proxy_url(self) -> Optional[str]:
