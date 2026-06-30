@@ -62,6 +62,8 @@ class StationBrowserDialog(QDialog):
         self._proxy_config = proxy_config or ProxyConfig()
         self._results = []
         self._worker = None
+        self._scan_worker = None
+        self._search_seq = 0
         self._build_ui()
 
     def _build_ui(self):
@@ -130,12 +132,14 @@ class StationBrowserDialog(QDialog):
         layout.addLayout(btn_layout)
         layout.addLayout(status_layout)
 
-    def _refresh_playlist_combo(self):
+    def refresh_playlist_combo(self):
         self._playlist_combo.clear()
         for pl in self._pm.playlists:
             self._playlist_combo.addItem(pl.name)
 
     def _search(self):
+        self._search_seq += 1
+        seq = self._search_seq
         name = self._search_input.text().strip()
         tag = self._tag_combo.currentText().strip()
         country = self._country_combo.currentText().strip()
@@ -153,11 +157,13 @@ class StationBrowserDialog(QDialog):
         self._status_label.setText("Searching...")
 
         self._worker = SearchWorker(self._client, params)
-        self._worker.finished.connect(self._on_results)
+        self._worker.finished.connect(lambda r: self._on_results(r, seq))
         self._worker.error.connect(self._on_error)
         self._worker.start()
 
-    def _on_results(self, results):
+    def _on_results(self, results, seq):
+        if seq != self._search_seq:
+            return
         self._results = []
         self._status_label.setText(f"Scanning {len(results)} streams...")
         self._search_btn.setEnabled(False)
@@ -172,15 +178,17 @@ class StationBrowserDialog(QDialog):
             workers=self._proxy_config.workers,
             proxies=proxies,
         )
-        self._scan_worker.finished.connect(self._on_scan_done)
+        self._scan_worker.finished.connect(lambda r: self._on_scan_done(r, seq))
         self._scan_worker.progress.connect(self._on_scan_progress)
-        self._scan_worker.station_found.connect(self._on_station_found)
+        self._scan_worker.station_found.connect(lambda r: self._on_station_found(r, seq))
         self._scan_worker.start()
 
     def _on_scan_progress(self, checked: int, total: int):
         self._status_label.setText(f"Scanning {checked}/{total}...")
 
-    def _on_station_found(self, station: dict):
+    def _on_station_found(self, station: dict, seq: int):
+        if seq != self._search_seq:
+            return
         self._results.append(station)
         row = self._table.rowCount()
         self._table.insertRow(row)
@@ -191,7 +199,9 @@ class StationBrowserDialog(QDialog):
         self._table.setItem(row, 4, QTableWidgetItem(str(station.get("bitrate", ""))))
         self._table.setItem(row, 5, QTableWidgetItem(station.get("language", "")))
 
-    def _on_scan_done(self, _responsive):
+    def _on_scan_done(self, _responsive, seq: int):
+        if seq != self._search_seq:
+            return
         self._search_btn.setEnabled(True)
         self._search_btn.setText("Search")
         self._status_label.setText(
