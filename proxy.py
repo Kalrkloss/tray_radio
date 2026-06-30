@@ -20,7 +20,10 @@ def set_auto_start(enabled: bool):
     try:
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_SET_VALUE)
         if enabled:
-            cmd = f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
+            if getattr(sys, "frozen", False):
+                cmd = f'"{sys.executable}"'
+            else:
+                cmd = f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
             winreg.SetValueEx(key, "TrayRadio", 0, winreg.REG_SZ, cmd)
         else:
             try:
