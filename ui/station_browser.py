@@ -185,7 +185,8 @@ class StationBrowserDialog(QDialog):
             return
         self._old_workers.append(w)
         w.finished.connect(lambda: self._release_worker(w))
-        w.error.connect(lambda: self._release_worker(w))
+        if hasattr(w, "error"):
+            w.error.connect(lambda: self._release_worker(w))
 
     def _release_worker(self, w):
         try:
