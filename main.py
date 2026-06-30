@@ -6,7 +6,7 @@ import logging
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import QTimer
 
-from proxy import ProxyConfig, resolve_proxy_for_url
+from proxy import ProxyConfig, resolve_proxy_for_url, set_auto_start
 from playlist_manager import PlaylistManager, Stream
 from catalog import RadioBrowserClient
 from player import Player
@@ -94,6 +94,7 @@ class TrayRadioApp:
 
     def start(self):
         self._resolve_proxy()
+        set_auto_start(self._proxy_config.auto_start)
 
         session = self._proxy_config.create_session()
 
@@ -127,6 +128,8 @@ class TrayRadioApp:
         self._check_auto_play()
 
     def _check_auto_play(self):
+        if not self._proxy_config.auto_play:
+            return
         stream = self._pm.get_current_stream()
         if stream:
             self._play_stream(stream)
@@ -210,9 +213,13 @@ class TrayRadioApp:
             if not self._catalog.discover():
                 QMessageBox.warning(None, "Catalog Error", "Could not reach radio-browser.info")
                 return
-        dialog = StationBrowserDialog(self._catalog, self._pm, proxy_config=self._proxy_config)
-        dialog.open_preview = self.open_preview
-        dialog.exec_()
+        if not hasattr(self, "_station_browser") or self._station_browser is None:
+            self._station_browser = StationBrowserDialog(
+                self._catalog, self._pm, proxy_config=self._proxy_config
+            )
+            self._station_browser.open_preview = self.open_preview
+        self._station_browser.refresh_playlist_combo()
+        self._station_browser.exec_()
 
     def _show_playlist_editor(self):
         dialog = PlaylistEditorDialog(self._pm)

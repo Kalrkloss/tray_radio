@@ -1,11 +1,11 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QSpinBox,
     QRadioButton, QButtonGroup, QPushButton, QGroupBox, QFormLayout,
-    QMessageBox,
+    QCheckBox, QMessageBox,
 )
 from PyQt5.QtCore import Qt
 
-from proxy import ProxyConfig, detect_system_proxy, get_system_pac_url, get_system_auto_detect
+from proxy import ProxyConfig, detect_system_proxy, get_system_pac_url, get_system_auto_detect, set_auto_start
 
 
 class SettingsDialog(QDialog):
@@ -71,6 +71,14 @@ class SettingsDialog(QDialog):
         sys_info_layout.addWidget(self._sys_proxy_label)
         layout.addWidget(sys_info_group)
 
+        self._auto_play_cb = QCheckBox("Auto-play last stream on startup")
+        self._auto_play_cb.setChecked(self._proxy_config.auto_play)
+        layout.addWidget(self._auto_play_cb)
+
+        self._auto_start_cb = QCheckBox("Start app automatically at Windows login")
+        self._auto_start_cb.setChecked(self._proxy_config.auto_start)
+        layout.addWidget(self._auto_start_cb)
+
         scan_group = QGroupBox("Station Scanner")
         scan_layout = QFormLayout(scan_group)
         self._workers_spin = QSpinBox()
@@ -129,6 +137,9 @@ class SettingsDialog(QDialog):
         self._proxy_config.username = self._user_edit.text().strip()
         self._proxy_config.password = self._pwd_edit.text()
         self._proxy_config.workers = self._workers_spin.value()
+        self._proxy_config.auto_play = self._auto_play_cb.isChecked()
+        self._proxy_config.auto_start = self._auto_start_cb.isChecked()
+        set_auto_start(self._proxy_config.auto_start)
         self.accept()
 
     @property

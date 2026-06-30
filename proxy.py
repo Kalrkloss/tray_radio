@@ -1,5 +1,7 @@
 import ctypes
 import ctypes.wintypes
+import os
+import sys
 import winreg
 import logging
 from dataclasses import dataclass
@@ -10,6 +12,27 @@ from pypac import PACSession, get_pac
 
 logger = logging.getLogger(__name__)
 
+STARTUP_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+
+def set_auto_start(enabled: bool):
+    key = None
+    try:
+        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_SET_VALUE)
+        if enabled:
+            cmd = f'"{sys.executable}" "{os.path.abspath(sys.argv[0])}"'
+            winreg.SetValueEx(key, "TrayRadio", 0, winreg.REG_SZ, cmd)
+        else:
+            try:
+                winreg.DeleteValue(key, "TrayRadio")
+            except FileNotFoundError:
+                pass
+    except Exception as e:
+        logger.error(f"Failed to set auto-start: {e}")
+    finally:
+        if key:
+            winreg.CloseKey(key)
+
 
 @dataclass
 class ProxyConfig:
@@ -19,6 +42,8 @@ class ProxyConfig:
     username: str = ""
     password: str = ""
     workers: int = 5
+    auto_play: bool = True
+    auto_start: bool = False
 
     def to_dict(self):
         return {
@@ -28,6 +53,8 @@ class ProxyConfig:
             "username": self.username,
             "password": self.password,
             "workers": self.workers,
+            "auto_play": self.auto_play,
+            "auto_start": self.auto_start,
         }
 
     @classmethod
@@ -39,6 +66,8 @@ class ProxyConfig:
             username=data.get("username", ""),
             password=data.get("password", ""),
             workers=data.get("workers", 5),
+            auto_play=data.get("auto_play", True),
+            auto_start=data.get("auto_start", False),
         )
 
     def get_proxy_url(self) -> Optional[str]:
