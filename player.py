@@ -334,7 +334,10 @@ class Player(QObject):
         self._worker: Optional[PlayWorker] = None
         self._play_seq = 0
         self._shutdown_done = False
-
+        self._old_workers: list[PlayWorker] = []
+        self._reap_timer = QTimer(self)
+        self._reap_timer.timeout.connect(self._reap_zombies)
+        self._reap_timer.start(5000)
         self._poll = QTimer(self)
         self._poll.timeout.connect(self._poll_state)
         self._poll.start(200)
@@ -375,6 +378,9 @@ class Player(QObject):
                 if client is not None:
                     client._stop_stream = True
                 return
+            # Worker's thread is done — deleteLater will fire via finished
+            # connection (from play()).  Keeping self._worker past this point
+            # would leave a dangling C++ reference once deleteLater processes.
             self._worker = None
             self._client = client
             self._stream = stream
@@ -394,7 +400,6 @@ class Player(QObject):
             seq = getattr(self.sender(), "_seq", -1) if self.sender() else -1
             if seq != self._play_seq:
                 return
-            self._worker = None
             self._current_url = None
             self._playing = False
         logger.error(f"Play failed: {msg}")
@@ -414,15 +419,47 @@ class Player(QObject):
             self._worker.start()
 
     def _cancel_worker(self):
-        if self._worker and self._worker.isRunning():
-            self._worker.ready.disconnect()
-            self._worker.error.disconnect()
-            self._worker.terminate()
-            if not self._worker.wait(3000):
-                self._worker.quit()
-                self._worker.wait(2000)
-            self._worker.deleteLater()
+        if not self._worker:
+            return
+        w = self._worker
         self._worker = None
+        try:
+            running = w.isRunning()
+        except RuntimeError:
+            # C++ QObject already deleted by finished → deleteLater
+            return
+        if running:
+            try:
+                w.ready.disconnect()
+                w.error.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            w.requestInterruption()
+            self._stash_worker(w)
+
+    def _stash_worker(self, w: PlayWorker):
+        self._old_workers.append(w)
+        w.finished.connect(lambda w=w: self._release_worker(w))
+
+    def _release_worker(self, w: PlayWorker):
+        try:
+            w.deleteLater()
+        except RuntimeError:
+            pass
+        try:
+            self._old_workers.remove(w)
+        except ValueError:
+            pass
+
+    def _reap_zombies(self):
+        alive = []
+        for w in self._old_workers:
+            try:
+                if w.isRunning():
+                    alive.append(w)
+            except RuntimeError:
+                pass
+        self._old_workers = alive
 
     def _cleanup(self):
         if self._stream_gen is not None:

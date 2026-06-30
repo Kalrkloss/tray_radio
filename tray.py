@@ -14,6 +14,7 @@ import pythoncom
 
 from icon_generator import create_tray_icon, create_playing_icon, create_stopped_icon
 from playlist_manager import PlaylistManager
+from notifier import SilentToastNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +28,13 @@ class TrayApp:
         self._is_playing: bool = False
         self._callbacks: dict[str, Callable] = {}
         self.cmd_queue: queue.Queue = queue.Queue()
+        self._notifier = SilentToastNotifier()
 
     def set_callbacks(self, callbacks: dict[str, Callable]):
         self._callbacks = callbacks
 
     def start(self):
+        self._notifier.start()
         self._register_aumid_shortcut()
         placeholder = Menu(MenuItem("Loading...", None, enabled=False))
         icon = pystray.Icon(
@@ -243,13 +246,15 @@ class TrayApp:
         if not self._icon:
             return
         self.dismiss_notification()
+        if self._notifier.notify(title, message):
+            return
         try:
             self._icon._message(
                 1,    # NIM_MODIFY
                 16,   # NIF_INFO
                 szInfo=message,
                 szInfoTitle=title,
-                dwInfoFlags=0x11,  # NIIF_INFO | NIIF_NOSOUND
+                dwInfoFlags=0x11,
             )
         except Exception:
             pass

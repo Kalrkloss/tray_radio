@@ -160,3 +160,25 @@ class PlaylistManager:
                 if s.uuid == uuid:
                     return i
         return None
+
+    def get_next_stream(self) -> Optional[Stream]:
+        if self.current_playlist_index < 0 or self.current_playlist_index >= len(self.playlists):
+            return None
+        pl = self.playlists[self.current_playlist_index]
+        if not pl.streams:
+            return None
+        for i, s in enumerate(pl.streams):
+            if s.uuid == self.current_stream_uuid:
+                return pl.streams[(i + 1) % len(pl.streams)]
+        return pl.streams[0]
+
+    def get_prev_stream(self) -> Optional[Stream]:
+        if self.current_playlist_index < 0 or self.current_playlist_index >= len(self.playlists):
+            return None
+        pl = self.playlists[self.current_playlist_index]
+        if not pl.streams:
+            return None
+        for i, s in enumerate(pl.streams):
+            if s.uuid == self.current_stream_uuid:
+                return pl.streams[(i - 1) % len(pl.streams)]
+        return pl.streams[-1]

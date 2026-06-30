@@ -18,6 +18,7 @@ from ui.playlist_editor import PlaylistEditorDialog
 from ui.station_browser import StationBrowserDialog
 from ui.stream_info import StreamInfoDialog
 from ui.add_stream_dialog import AddStreamDialog
+from media_keys import MediaKeyHandler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -121,6 +122,9 @@ class TrayRadioApp:
         self._player.error_occurred.connect(self._on_player_error)
         self._player.song_changed.connect(self._on_song_change)
         self._player.station_info_changed.connect(self._on_station_info)
+
+        self._media_keys = MediaKeyHandler(self._media_key_callback)
+        QTimer.singleShot(0, self._media_keys.install)
 
         self._poll_timer = QTimer()
         self._poll_timer.timeout.connect(self._tray.process_commands)
@@ -231,6 +235,26 @@ class TrayRadioApp:
         if dialog.exec_() == AddStreamDialog.Accepted:
             self._tray._refresh()
 
+    def _media_key_callback(self, action: str):
+        if action == "play_pause":
+            self._toggle_play_pause()
+        elif action == "stop":
+            self._stop_playback()
+        elif action == "next":
+            self._play_next()
+        elif action == "prev":
+            self._play_previous()
+
+    def _play_next(self):
+        stream = self._pm.get_next_stream()
+        if stream:
+            self._play_stream(stream)
+
+    def _play_previous(self):
+        stream = self._pm.get_prev_stream()
+        if stream:
+            self._play_stream(stream)
+
     def _show_stream_info(self):
         if self._current_station:
             self._stream_info_dialog = StreamInfoDialog(
@@ -240,8 +264,10 @@ class TrayRadioApp:
 
     def _quit(self):
         logger.info("Shutting down...")
+        self._media_keys.unregister()
         self._player.shutdown()
         if self._tray:
+            self._tray._notifier.shutdown()
             self._tray.stop()
         QApplication.instance().quit()
 
