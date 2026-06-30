@@ -219,10 +219,13 @@ class TrayRadioApp:
         AboutDialog.show_modal()
 
     def _show_settings(self):
+        old_device = self._proxy_config.output_device
         dialog = SettingsDialog(self._proxy_config)
         if dialog.exec_() == SettingsDialog.Accepted:
-            self._proxy_config = dialog.proxy_config
+            new_device = self._proxy_config.output_device
             self._save_proxy_config()
+            if new_device != old_device:
+                self._player.set_output_device(new_device)
 
     def _show_station_browser(self):
         if not self._catalogs:

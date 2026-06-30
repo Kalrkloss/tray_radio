@@ -604,6 +604,31 @@ class Player(QObject):
         elif self._current_url:
             self.resume()
 
+    def set_output_device(self, device_name: str):
+        with self._lock:
+            if not self._stream_gen:
+                logger.debug("set_output_device: no stream_gen")
+                return
+            if self._device:
+                try:
+                    logger.debug("set_output_device: stopping old device")
+                    t = threading.Thread(target=self._device.stop, daemon=True)
+                    t.start()
+                    t.join(2.0)
+                except Exception:
+                    pass
+                self._device = None
+            try:
+                logger.debug("set_output_device: creating device for %s", device_name)
+                device_id = find_device_id(device_name)
+                self._device = PlaybackDevice(device_id=device_id)
+                self._device.start(self._stream_gen)
+                self._playing = True
+                logger.debug("set_output_device: success")
+            except Exception as e:
+                logger.error("set_output_device failed: %s", e)
+                self._playing = False
+
     @property
     def is_playing(self) -> bool:
         return self._playing
