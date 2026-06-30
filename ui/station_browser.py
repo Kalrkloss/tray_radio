@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QComboBox,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
-    QMessageBox, QLabel, QGroupBox, QProgressDialog,
+    QMessageBox, QLabel, QGroupBox, QCheckBox,
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
@@ -33,11 +33,12 @@ class ScanWorker(QThread):
     progress = pyqtSignal(int, int)
     station_found = pyqtSignal(dict)
 
-    def __init__(self, stations: list, workers: int, proxies: dict):
+    def __init__(self, stations: list, workers: int, proxies: dict, commercials: bool = False):
         super().__init__()
         self._stations = stations
         self._workers = workers
         self._proxies = proxies
+        self._commercials = commercials
 
     def run(self):
         self.progress.emit(0, len(self._stations))
@@ -47,6 +48,7 @@ class ScanWorker(QThread):
             proxies=self._proxies or None,
             progress_cb=lambda c, t: self.progress.emit(c, t),
             responsive_cb=lambda r: self.station_found.emit(r),
+            commercials=self._commercials,
         )
         self.finished.emit(results)
 
@@ -65,6 +67,9 @@ class StationBrowserDialog(QDialog):
         self._scan_worker = None
         self._old_workers = []
         self._search_seq = 0
+        self._search_offset = 0
+        self._last_params = None
+        self._last_results_full = False
         self._build_ui()
 
     def _get_catalog(self) -> CatalogBase:
@@ -77,7 +82,8 @@ class StationBrowserDialog(QDialog):
         layout = QVBoxLayout(self)
 
         search_group = QGroupBox("Search")
-        search_layout = QHBoxLayout(search_group)
+        search_vbox = QVBoxLayout(search_group)
+        search_row = QHBoxLayout()
 
         self._search_input = QLineEdit()
         self._search_input.setPlaceholderText("Station name...")
@@ -98,20 +104,30 @@ class StationBrowserDialog(QDialog):
         self._search_btn = QPushButton("Search")
         self._search_btn.clicked.connect(self._search)
 
-        search_layout.addWidget(QLabel("Name:"))
-        search_layout.addWidget(self._search_input)
-        search_layout.addWidget(QLabel("Tag:"))
-        search_layout.addWidget(self._tag_combo)
-        search_layout.addWidget(QLabel("Country:"))
-        search_layout.addWidget(self._country_combo)
-        search_layout.addWidget(QLabel("Catalog:"))
-        search_layout.addWidget(self._catalog_combo)
-        search_layout.addWidget(self._search_btn)
+        self._scan_cb = QCheckBox("Scan streams")
+        self._scan_cb.setChecked(True)
+        self._scan_cb.setToolTip("Test each stream before listing (slower but shows only reachable stations)")
+
+        self._commercial_cb = QCheckBox("Check for commercials")
+        self._commercial_cb.setChecked(False)
+        self._commercial_cb.setToolTip("Detect possible commercial insertion via redirect analysis and audio transition heuristics")
+
+        search_row.addWidget(QLabel("Name:"))
+        search_row.addWidget(self._search_input)
+        search_row.addWidget(QLabel("Tag:"))
+        search_row.addWidget(self._tag_combo)
+        search_row.addWidget(QLabel("Country:"))
+        search_row.addWidget(self._country_combo)
+        search_row.addWidget(QLabel("Catalog:"))
+        search_row.addWidget(self._catalog_combo)
+        search_row.addWidget(self._search_btn)
+        search_vbox.addLayout(search_row)
+        search_vbox.addLayout(self._make_checkbox_row())
         layout.addWidget(search_group)
 
         self._table = QTableWidget()
-        self._table.setColumnCount(6)
-        self._table.setHorizontalHeaderLabels(["Name", "Tags", "Country", "Codec", "Bitrate", "Language"])
+        self._table.setColumnCount(7)
+        self._table.setHorizontalHeaderLabels(["Name", "Tags", "Country", "Codec", "Bitrate", "Language", "Commercial"])
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -138,12 +154,23 @@ class StationBrowserDialog(QDialog):
         self._status_label = QLabel("")
         status_layout.addWidget(self._status_label)
         status_layout.addStretch()
+        self._load_more_btn = QPushButton("Load more\u2026")
+        self._load_more_btn.clicked.connect(self._load_more)
+        self._load_more_btn.setVisible(False)
+        status_layout.addWidget(self._load_more_btn)
         self._close_btn = QPushButton("Close")
         self._close_btn.clicked.connect(self.accept)
         status_layout.addWidget(self._close_btn)
 
         layout.addLayout(btn_layout)
         layout.addLayout(status_layout)
+
+    def _make_checkbox_row(self):
+        row = QHBoxLayout()
+        row.addWidget(self._scan_cb)
+        row.addWidget(self._commercial_cb)
+        row.addStretch()
+        return row
 
     def refresh_playlist_combo(self):
         self._playlist_combo.clear()
@@ -161,7 +188,9 @@ class StationBrowserDialog(QDialog):
         name = self._search_input.text().strip()
         tag = self._tag_combo.currentText().strip()
         country = self._country_combo.currentText().strip()
-        params = {"limit": 100}
+        self._search_offset = 0
+        self._last_results_full = False
+        params = {"limit": 100, "offset": 0}
 
         if name:
             params["name"] = name
@@ -169,14 +198,37 @@ class StationBrowserDialog(QDialog):
             params["tag"] = tag
         if country:
             params["country"] = country
+        self._last_params = params
 
         self._search_btn.setEnabled(False)
         self._search_btn.setText("Searching...")
         self._status_label.setText("Searching...")
+        self._load_more_btn.setVisible(False)
 
         self._stash_worker(self._worker)
         self._worker = SearchWorker(catalog, params)
-        self._worker.finished.connect(lambda r: self._on_results(r, seq))
+        self._worker.finished.connect(lambda r: self._on_results(r, seq, append=False))
+        self._worker.error.connect(self._on_error)
+        self._worker.start()
+
+    def _load_more(self):
+        if not self._last_params:
+            return
+        catalog = self._get_catalog()
+        if not catalog:
+            return
+
+        params = dict(self._last_params)
+        params["offset"] = self._search_offset
+        seq = self._search_seq
+
+        self._load_more_btn.setEnabled(False)
+        self._load_more_btn.setText("Loading\u2026")
+        self._status_label.setText(f"Loading more (from #{self._search_offset + 1})\u2026")
+
+        self._stash_worker(self._worker)
+        self._worker = SearchWorker(catalog, params)
+        self._worker.finished.connect(lambda r: self._on_results(r, seq, append=True))
         self._worker.error.connect(self._on_error)
         self._worker.start()
 
@@ -194,28 +246,49 @@ class StationBrowserDialog(QDialog):
         except ValueError:
             pass
 
-    def _on_results(self, results, seq):
+    def _on_results(self, results, seq, append=False):
         if seq != self._search_seq:
             return
-        self._results = []
-        self._status_label.setText(f"Scanning {len(results)} streams...")
-        self._search_btn.setEnabled(False)
-        self._search_btn.setText("Scanning...")
-        self._table.setRowCount(0)
+        if not append:
+            self._results = []
+            self._table.setRowCount(0)
 
-        session = self._proxy_config.create_session()
-        proxies = session.proxies if session.proxies else None
+        self._search_offset += len(results)
+        self._last_results_full = len(results) >= 100
 
-        self._stash_worker(self._scan_worker)
-        self._scan_worker = ScanWorker(
-            results,
-            workers=self._proxy_config.workers,
-            proxies=proxies,
-        )
-        self._scan_worker.finished.connect(lambda r: self._on_scan_done(r, seq))
-        self._scan_worker.progress.connect(self._on_scan_progress)
-        self._scan_worker.station_found.connect(lambda r: self._on_station_found(r, seq))
-        self._scan_worker.start()
+        if self._scan_cb.isChecked():
+            if not append:
+                self._search_btn.setEnabled(False)
+                self._search_btn.setText("Scanning...")
+            self._status_label.setText(f"Scanning {len(results)} streams...")
+
+            session = self._proxy_config.create_session()
+            proxies = session.proxies if session.proxies else None
+
+            self._stash_worker(self._scan_worker)
+            self._scan_worker = ScanWorker(
+                results,
+                workers=self._proxy_config.workers,
+                proxies=proxies,
+                commercials=self._commercial_cb.isChecked(),
+            )
+            self._scan_worker.finished.connect(lambda r: self._on_scan_done(r, seq, append=append))
+            self._scan_worker.progress.connect(self._on_scan_progress)
+            self._scan_worker.station_found.connect(lambda r: self._on_station_found(r, seq))
+            self._scan_worker.start()
+        else:
+            for r in results:
+                self._results.append(r)
+                row = self._table.rowCount()
+                self._table.insertRow(row)
+                self._table.setItem(row, 0, QTableWidgetItem(r.get("name", "")))
+                self._table.setItem(row, 1, QTableWidgetItem(r.get("tags", "")))
+                self._table.setItem(row, 2, QTableWidgetItem(r.get("country", "")))
+                self._table.setItem(row, 3, QTableWidgetItem(r.get("codec", "")))
+                self._table.setItem(row, 4, QTableWidgetItem(str(r.get("bitrate", ""))))
+                self._table.setItem(row, 5, QTableWidgetItem(r.get("language", "")))
+                self._table.setItem(row, 6, QTableWidgetItem("\u2014"))
+            self._refresh_after_results(append)
 
     def _on_scan_progress(self, checked: int, total: int):
         self._status_label.setText(f"Scanning {checked}/{total}...")
@@ -232,12 +305,30 @@ class StationBrowserDialog(QDialog):
         self._table.setItem(row, 3, QTableWidgetItem(station.get("codec", "")))
         self._table.setItem(row, 4, QTableWidgetItem(str(station.get("bitrate", ""))))
         self._table.setItem(row, 5, QTableWidgetItem(station.get("language", "")))
+        com = station.get("has_commercial")
+        if com is True:
+            self._table.setItem(row, 6, QTableWidgetItem("Yes"))
+        elif com is False:
+            self._table.setItem(row, 6, QTableWidgetItem("No"))
+        else:
+            self._table.setItem(row, 6, QTableWidgetItem("\u2014"))
 
-    def _on_scan_done(self, _responsive, seq: int):
+    def _refresh_after_results(self, append: bool = False):
+        if not append:
+            self._search_btn.setEnabled(True)
+            self._search_btn.setText("Search")
+        self._load_more_btn.setEnabled(True)
+        self._load_more_btn.setText("Load more\u2026")
+        self._load_more_btn.setVisible(self._last_results_full)
+        total_shown = len(self._results)
+        self._status_label.setText(
+            f"Found {total_shown} stations"
+        )
+
+    def _on_scan_done(self, _responsive, seq: int, append: bool = False):
         if seq != self._search_seq:
             return
-        self._search_btn.setEnabled(True)
-        self._search_btn.setText("Search")
+        self._refresh_after_results(append=append)
         self._status_label.setText(
             f"Found {len(self._results)} responsive"
         )

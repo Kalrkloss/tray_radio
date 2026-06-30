@@ -1,5 +1,6 @@
 import logging
 import socket
+import ssl
 import threading
 import urllib.request
 from typing import Optional, Callable
@@ -361,13 +362,17 @@ class Player(QObject):
         }
 
     def set_proxy(self, proxy_url: Optional[str]):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        https_handler = urllib.request.HTTPSHandler(context=ctx)
         if proxy_url:
-            handler = urllib.request.ProxyHandler({
+            proxy_handler = urllib.request.ProxyHandler({
                 "http": proxy_url, "https": proxy_url,
             })
-            opener = urllib.request.build_opener(handler)
+            opener = urllib.request.build_opener(proxy_handler, https_handler)
         else:
-            opener = urllib.request.build_opener()
+            opener = urllib.request.build_opener(https_handler)
         opener.addheaders = [("User-Agent", "TrayRadio/1.0")]
         urllib.request.install_opener(opener)
 
@@ -424,18 +429,19 @@ class Player(QObject):
         w = self._worker
         self._worker = None
         try:
-            running = w.isRunning()
+            w.ready.disconnect()
+            w.error.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+        try:
+            if w.isRunning():
+                w.requestInterruption()
         except RuntimeError:
             # C++ QObject already deleted by finished → deleteLater
             return
-        if running:
-            try:
-                w.ready.disconnect()
-                w.error.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            w.requestInterruption()
-            self._stash_worker(w)
+        # Always stash — prevents Python GC from destroying the C++ QThread
+        # before the event loop processes its finished signal.
+        self._stash_worker(w)
 
     def _stash_worker(self, w: PlayWorker):
         self._old_workers.append(w)
@@ -489,6 +495,7 @@ class Player(QObject):
             return
         with self._lock:
             self._shutdown_done = True
+            self._play_seq += 1
             self._cancel_worker()
             self._cleanup()
 

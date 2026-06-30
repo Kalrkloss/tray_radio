@@ -26,7 +26,7 @@ class CatalogBase(abc.ABC):
 
     @abc.abstractmethod
     def search(self, name: str = "", tag: str = "", country: str = "",
-               limit: int = 50) -> list[dict]:
+               limit: int = 50, offset: int = 0) -> list[dict]:
         ...
 
     @abc.abstractmethod
@@ -96,15 +96,15 @@ class RadioBrowserCatalog(CatalogBase):
         return self.session.get(url, params=params, timeout=timeout)
 
     def search(self, name: str = "", tag: str = "", country: str = "",
-               limit: int = 50) -> list[dict]:
-        params = {"limit": limit}
+               limit: int = 50, offset: int = 0) -> list[dict]:
+        params = {"limit": limit, "offset": offset}
         if name:
             params["name"] = name
         if tag:
             params["tag"] = tag
         if country:
             params["country"] = country
-        resp = self._get("/json/stations/search", params=params)
+        resp = self._get("/json/stations/search", params=params, timeout=30)
         if resp.ok:
             return resp.json()
         return []
@@ -170,7 +170,7 @@ class LocalCatalog(CatalogBase):
         return "Curated Stations"
 
     def search(self, name: str = "", tag: str = "", country: str = "",
-               limit: int = 50) -> list[dict]:
+               limit: int = 50, offset: int = 0) -> list[dict]:
         results = list(self._stations)
         if name:
             q = name.lower()
@@ -181,7 +181,7 @@ class LocalCatalog(CatalogBase):
         if country:
             q = country.lower()
             results = [s for s in results if q in s.get("country", "").lower()]
-        return results[:limit]
+        return results[offset:offset + limit]
 
     def station_to_stream(self, data: dict) -> dict:
         return {

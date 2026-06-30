@@ -218,13 +218,12 @@ class TrayRadioApp:
         if not self._catalogs:
             QMessageBox.warning(None, "Catalog Error", "No station catalogs reachable")
             return
-        if not hasattr(self, "_station_browser") or self._station_browser is None:
-            self._station_browser = StationBrowserDialog(
-                self._catalogs, self._pm, proxy_config=self._proxy_config
-            )
-            self._station_browser.open_preview = self.open_preview
-        self._station_browser.refresh_playlist_combo()
-        self._station_browser.exec_()
+        dialog = StationBrowserDialog(
+            self._catalogs, self._pm, proxy_config=self._proxy_config
+        )
+        dialog.open_preview = self.open_preview
+        dialog.refresh_playlist_combo()
+        dialog.exec_()
 
     def _show_playlist_editor(self):
         dialog = PlaylistEditorDialog(self._pm)
@@ -265,10 +264,10 @@ class TrayRadioApp:
     def _quit(self):
         logger.info("Shutting down...")
         self._media_keys.unregister()
+        QTimer.singleShot(3000, lambda: os._exit(1))
         self._player.shutdown()
         if self._tray:
             self._tray._notifier.shutdown()
-            self._tray.stop()
         QApplication.instance().quit()
 
 

@@ -244,10 +244,27 @@ def resolve_proxy_for_url(url: str) -> Optional[str]:
     logger.info(f"resolve_proxy_for_url: starting for {url}")
 
     config = get_ie_proxy_config_raw()
-    if not config:
-        logger.info("resolve_proxy_for_url: no IE proxy config")
-        return None
 
+    # Quick path: static proxy from IE config (no PAC/detect needed)
+    if config and config.lpszProxy and not config.lpszAutoConfigUrl and not config.fAutoDetect:
+        proxy = config.lpszProxy
+        if "=" in proxy:
+            parts = proxy.split(";")
+            for part in parts:
+                part = part.strip()
+                if part.lower().startswith("http="):
+                    result = part.split("=", 1)[1].strip()
+                    logger.info(f"resolve_proxy_for_url: static IE proxy = {result}")
+                    return result
+            for part in parts:
+                part = part.strip()
+                if "=" not in part:
+                    logger.info(f"resolve_proxy_for_url: static IE proxy = {part}")
+                    return part
+        logger.info(f"resolve_proxy_for_url: static IE proxy = {proxy}")
+        return proxy
+
+    # Try WinHttpGetProxyForUrl (PAC or auto-detect)
     winhttp = ctypes.windll.winhttp
     types = _get_winhttp_types()
     AutoProxyOpts = types[1]
@@ -260,56 +277,41 @@ def resolve_proxy_for_url(url: str) -> Optional[str]:
     )
     if not session:
         logger.debug("WinHttpOpen failed")
-        return None
+        return detect_system_proxy()
 
     try:
-        auto_opts = AutoProxyOpts()
-        auto_opts.fAutoLogonIfChallenged = True
+        has_pac_or_detect = (config and (config.lpszAutoConfigUrl or config.fAutoDetect))
+        if has_pac_or_detect:
+            auto_opts = AutoProxyOpts()
+            auto_opts.fAutoLogonIfChallenged = True
 
-        if config.lpszAutoConfigUrl:
-            auto_opts.dwFlags = WINHTTP_AUTOPROXY_CONFIG_URL
-            auto_opts.lpszAutoConfigUrl = config.lpszAutoConfigUrl
-        elif config.fAutoDetect:
-            auto_opts.dwFlags = WINHTTP_AUTOPROXY_AUTO_DETECT
-            auto_opts.dwAutoDetectFlags = (
-                WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A
-            )
-        else:
-            if config.lpszProxy:
-                proxy = config.lpszProxy
-                if "=" in proxy:
-                    parts = proxy.split(";")
-                    for part in parts:
-                        part = part.strip()
-                        if part.lower().startswith("http="):
-                            return part.split("=", 1)[1].strip()
-                    for part in parts:
-                        part = part.strip()
-                        if "=" not in part:
-                            return part
-                return proxy
-            return None
+            if config.lpszAutoConfigUrl:
+                auto_opts.dwFlags = WINHTTP_AUTOPROXY_CONFIG_URL
+                auto_opts.lpszAutoConfigUrl = config.lpszAutoConfigUrl
+            else:
+                auto_opts.dwFlags = WINHTTP_AUTOPROXY_AUTO_DETECT
+                auto_opts.dwAutoDetectFlags = (
+                    WINHTTP_AUTO_DETECT_TYPE_DHCP | WINHTTP_AUTO_DETECT_TYPE_DNS_A
+                )
 
-        proxy_info = ProxyInfo()
-        if winhttp.WinHttpGetProxyForUrl(
-            session,
-            ctypes.byref(auto_opts),
-            url,
-            ctypes.byref(proxy_info),
-        ):
-            if proxy_info.dwAccessType == WINHTTP_ACCESS_TYPE_NAMED_PROXY:
-                result = proxy_info.lpszProxy
-                logger.info(f"resolve_proxy_for_url: done in {_time.time()-_start:.1f}s, proxy={result}")
-                return result
-        else:
-            err = ctypes.windll.kernel32.GetLastError()
-            logger.info(f"resolve_proxy_for_url: WinHttpGetProxyForUrl failed (error {err}) in {_time.time()-_start:.1f}s")
-            if config.lpszProxy:
-                fallback = config.lpszProxy
-                logger.info(f"resolve_proxy_for_url: using fallback proxy {fallback}")
-                return fallback
+            proxy_info = ProxyInfo()
+            if winhttp.WinHttpGetProxyForUrl(
+                session,
+                ctypes.byref(auto_opts),
+                url,
+                ctypes.byref(proxy_info),
+            ):
+                if proxy_info.dwAccessType == WINHTTP_ACCESS_TYPE_NAMED_PROXY:
+                    result = proxy_info.lpszProxy
+                    logger.info(f"resolve_proxy_for_url: PAC/detect done in {_time.time()-_start:.1f}s, proxy={result}")
+                    return result
+            else:
+                err = ctypes.windll.kernel32.GetLastError()
+                logger.info(f"resolve_proxy_for_url: WinHttpGetProxyForUrl failed (error {err}) in {_time.time()-_start:.1f}s")
     finally:
         winhttp.WinHttpCloseHandle(session)
 
-    logger.info(f"resolve_proxy_for_url: no proxy found in {_time.time()-_start:.1f}s")
-    return None
+    # Last resort: fall back to static proxy / registry
+    fallback = detect_system_proxy()
+    logger.info(f"resolve_proxy_for_url: fallback to detect_system_proxy = {fallback}")
+    return fallback
