@@ -1,0 +1,5 @@
+PyQt5>=5.15
+pystray>=0.19
+Pillow>=10.0
+requests>=2.31
+pywin32>=300

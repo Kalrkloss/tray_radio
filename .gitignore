@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+logo_cache/
+config.json
+org.eclipse.import/
