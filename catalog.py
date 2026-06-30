@@ -12,6 +12,12 @@ logger = logging.getLogger(__name__)
 
 _MEIPASS = getattr(sys, '_MEIPASS', None)
 
+_LEADING_JUNK = " \t+-#*=._~|>"
+
+
+def _clean_name(raw: str) -> str:
+    return raw.lstrip(_LEADING_JUNK).strip()
+
 
 class CatalogBase(abc.ABC):
     @property
@@ -106,7 +112,10 @@ class RadioBrowserCatalog(CatalogBase):
             params["country"] = country
         resp = self._get("/json/stations/search", params=params, timeout=30)
         if resp.ok:
-            return resp.json()
+            results = resp.json()
+            for r in results:
+                r["name"] = _clean_name(r.get("name", ""))
+            return results
         return []
 
     def click_station(self, uuid: str):
@@ -118,7 +127,7 @@ class RadioBrowserCatalog(CatalogBase):
     def station_to_stream(self, data: dict) -> dict:
         return {
             "uuid": data.get("stationuuid", ""),
-            "name": data.get("name", ""),
+            "name": _clean_name(data.get("name", "")),
             "url": data.get("url", ""),
             "url_resolved": data.get("url_resolved", ""),
             "homepage": data.get("homepage", ""),
@@ -174,19 +183,21 @@ class LocalCatalog(CatalogBase):
         results = list(self._stations)
         if name:
             q = name.lower()
-            results = [s for s in results if q in s.get("name", "").lower()]
+            results = [s for s in results if q in _clean_name(s.get("name", "")).lower()]
         if tag:
             q = tag.lower()
             results = [s for s in results if q in s.get("tags", "").lower()]
         if country:
             q = country.lower()
             results = [s for s in results if q in s.get("country", "").lower()]
+        for r in results:
+            r["name"] = _clean_name(r.get("name", ""))
         return results[offset:offset + limit]
 
     def station_to_stream(self, data: dict) -> dict:
         return {
             "uuid": data.get("uuid", ""),
-            "name": data.get("name", ""),
+            "name": _clean_name(data.get("name", "")),
             "url": data.get("url", ""),
             "url_resolved": data.get("url_resolved", ""),
             "homepage": data.get("homepage", ""),

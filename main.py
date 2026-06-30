@@ -264,11 +264,10 @@ class TrayRadioApp:
     def _quit(self):
         logger.info("Shutting down...")
         self._media_keys.unregister()
-        QTimer.singleShot(3000, lambda: os._exit(1))
-        self._player.shutdown()
         if self._tray:
             self._tray._notifier.shutdown()
-        QApplication.instance().quit()
+        logger.info("Exiting...")
+        os._exit(0)
 
 
 def main():
@@ -285,7 +284,6 @@ def main():
     tray_app = TrayRadioApp()
     tray_app.start()
     logger.info("Tray icon ready")
-    app.aboutToQuit.connect(tray_app._player.shutdown)
 
     sys.exit(app.exec_())
 
