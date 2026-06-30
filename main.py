@@ -8,7 +8,7 @@ from PyQt5.QtCore import QTimer, Qt
 
 from proxy import ProxyConfig, resolve_proxy_for_url, set_auto_start
 from playlist_manager import PlaylistManager, Stream
-from catalog import RadioBrowserClient
+from catalog import CatalogBase, probe_catalogs
 from player import Player
 from tray import TrayApp
 from icon_generator import fetch_logo, create_playing_icon
@@ -37,7 +37,7 @@ class TrayRadioApp:
         self._proxy_config = self._load_proxy_config()
         self._pm = PlaylistManager(CONFIG_DIR)
         self._player = Player()
-        self._catalog: RadioBrowserClient = None
+        self._catalogs: list[CatalogBase] = []
         self._tray: TrayApp = None
         self._current_station: Stream = None
         self._current_song: str = ""
@@ -98,10 +98,9 @@ class TrayRadioApp:
 
         session = self._proxy_config.create_session()
 
-        self._catalog = RadioBrowserClient(session)
-        discovered = self._catalog.discover()
-        if not discovered:
-            logger.warning("Could not discover radio-browser server")
+        self._catalogs = probe_catalogs(session)
+        if not self._catalogs:
+            logger.warning("No catalogs available")
 
         self._tray = TrayApp(self._pm)
         self._tray.set_callbacks({
@@ -207,15 +206,15 @@ class TrayRadioApp:
             self._save_proxy_config()
 
     def _show_station_browser(self):
-        if not self._catalog.base_url:
+        if not self._catalogs:
             session = self._proxy_config.create_session()
-            self._catalog = RadioBrowserClient(session)
-            if not self._catalog.discover():
-                QMessageBox.warning(None, "Catalog Error", "Could not reach radio-browser.info")
-                return
+            self._catalogs = probe_catalogs(session)
+        if not self._catalogs:
+            QMessageBox.warning(None, "Catalog Error", "No station catalogs reachable")
+            return
         if not hasattr(self, "_station_browser") or self._station_browser is None:
             self._station_browser = StationBrowserDialog(
-                self._catalog, self._pm, proxy_config=self._proxy_config
+                self._catalogs, self._pm, proxy_config=self._proxy_config
             )
             self._station_browser.open_preview = self.open_preview
         self._station_browser.refresh_playlist_combo()

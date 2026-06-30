@@ -29,6 +29,7 @@
         <Component Id="AppExe" Guid="BE5CB4DC-D00A-4C88-A0FD-21A05A5343C7" Bitness="always64">
           <File Id="TrayRadioExe" Source="dist\Tray Radio.exe" KeyPath="yes" />
           <File Id="TrayRadioIco" Source="dist\tray_radio.ico" />
+          <File Id="StationsJson" Source="stations.json" />
           <Shortcut
             Id="StartMenuShortcut"
             Directory="ProgramMenuFolder"

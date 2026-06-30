@@ -5,7 +5,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
 
-from catalog import RadioBrowserClient
+from catalog import CatalogBase
 from playlist_manager import PlaylistManager, Stream
 from scanner import scan_streams
 from proxy import ProxyConfig
@@ -15,18 +15,17 @@ class SearchWorker(QThread):
     finished = pyqtSignal(list)
     error = pyqtSignal(str)
 
-    def __init__(self, client: RadioBrowserClient, params: dict):
+    def __init__(self, catalog: CatalogBase, params: dict):
         super().__init__()
-        self._client = client
+        self._catalog = catalog
         self._params = params
 
     def run(self):
         try:
-            results = self._client.search_stations(**self._params)
+            results = self._catalog.search(**self._params)
             self.finished.emit(results)
         except Exception as e:
             self.error.emit(str(e))
-
 
 
 class ScanWorker(QThread):
@@ -53,12 +52,12 @@ class ScanWorker(QThread):
 
 
 class StationBrowserDialog(QDialog):
-    def __init__(self, client: RadioBrowserClient, playlist_manager: PlaylistManager,
+    def __init__(self, catalogs: list[CatalogBase], playlist_manager: PlaylistManager,
                  proxy_config: ProxyConfig = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Browse Radio Stations")
         self.setMinimumSize(700, 500)
-        self._client = client
+        self._catalogs = catalogs
         self._pm = playlist_manager
         self._proxy_config = proxy_config or ProxyConfig()
         self._results = []
@@ -67,6 +66,12 @@ class StationBrowserDialog(QDialog):
         self._old_workers = []
         self._search_seq = 0
         self._build_ui()
+
+    def _get_catalog(self) -> CatalogBase:
+        idx = self._catalog_combo.currentIndex()
+        if 0 <= idx < len(self._catalogs):
+            return self._catalogs[idx]
+        return self._catalogs[0] if self._catalogs else None
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -86,6 +91,10 @@ class StationBrowserDialog(QDialog):
         self._country_combo.setEditable(True)
         self._country_combo.setPlaceholderText("Country")
 
+        self._catalog_combo = QComboBox()
+        for c in self._catalogs:
+            self._catalog_combo.addItem(c.name, c.id)
+
         self._search_btn = QPushButton("Search")
         self._search_btn.clicked.connect(self._search)
 
@@ -95,6 +104,8 @@ class StationBrowserDialog(QDialog):
         search_layout.addWidget(self._tag_combo)
         search_layout.addWidget(QLabel("Country:"))
         search_layout.addWidget(self._country_combo)
+        search_layout.addWidget(QLabel("Catalog:"))
+        search_layout.addWidget(self._catalog_combo)
         search_layout.addWidget(self._search_btn)
         layout.addWidget(search_group)
 
@@ -142,6 +153,11 @@ class StationBrowserDialog(QDialog):
     def _search(self):
         self._search_seq += 1
         seq = self._search_seq
+        catalog = self._get_catalog()
+        if not catalog:
+            self._status_label.setText("No catalog selected")
+            return
+
         name = self._search_input.text().strip()
         tag = self._tag_combo.currentText().strip()
         country = self._country_combo.currentText().strip()
@@ -159,7 +175,7 @@ class StationBrowserDialog(QDialog):
         self._status_label.setText("Searching...")
 
         self._stash_worker(self._worker)
-        self._worker = SearchWorker(self._client, params)
+        self._worker = SearchWorker(catalog, params)
         self._worker.finished.connect(lambda r: self._on_results(r, seq))
         self._worker.error.connect(self._on_error)
         self._worker.start()
@@ -242,10 +258,13 @@ class StationBrowserDialog(QDialog):
             QMessageBox.information(self, "Add Station", "Select a target playlist.")
             return
 
+        catalog = self._get_catalog()
+        if not catalog:
+            return
         r = self._results[row]
-        stream = Stream(**RadioBrowserClient.station_to_stream(r))
+        stream = Stream(**catalog.station_to_stream(r))
         if self._pm.add_stream(pl_idx, stream):
-            self._client.click_station(r.get("stationuuid", ""))
+            catalog.click_station(r.get("stationuuid", ""))
             self._status_label.setText(f'Added "{stream.name}" to "{self._pm.playlists[pl_idx].name}"')
         else:
             self._status_label.setText(f'"{stream.name}" already in "{self._pm.playlists[pl_idx].name}"')
@@ -254,8 +273,11 @@ class StationBrowserDialog(QDialog):
         row = self._table.currentRow()
         if row < 0:
             return
+        catalog = self._get_catalog()
+        if not catalog:
+            return
         r = self._results[row]
-        stream_data = RadioBrowserClient.station_to_stream(r)
+        stream_data = catalog.station_to_stream(r)
         url = stream_data.get("url_resolved") or stream_data.get("url", "")
         name = stream_data.get("name", "") or r.get("name", "")
         codec = stream_data.get("codec", "") or r.get("codec", "")

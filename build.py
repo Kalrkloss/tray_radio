@@ -43,6 +43,7 @@ args = [
     "--hidden-import", "numpy",
     "--hidden-import", "PIL.Image",
     "--hidden-import", "PIL.ImageDraw",
+    "--add-data", f"{os.path.join(os.path.dirname(__file__), 'stations.json')}{os.pathsep}.",
     "--hidden-import", "requests",
     "--hidden-import", "miniaudio",
     "--collect-all", "av",
