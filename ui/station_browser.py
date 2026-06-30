@@ -133,6 +133,7 @@ class StationBrowserDialog(QDialog):
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
         self._table.setSelectionMode(QTableWidget.SingleSelection)
         self._table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self._table.setSortingEnabled(True)
         self._table.doubleClicked.connect(self._preview)
         layout.addWidget(self._table)
 
@@ -171,6 +172,50 @@ class StationBrowserDialog(QDialog):
         row.addWidget(self._commercial_cb)
         row.addStretch()
         return row
+
+    def _add_table_row(self, station: dict):
+        idx = len(self._results)
+        self._results.append(station)
+        self._table.setSortingEnabled(False)
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+        item0 = QTableWidgetItem()
+        item0.setData(Qt.DisplayRole, station.get("name", ""))
+        item0.setData(Qt.UserRole, idx)
+        self._table.setItem(row, 0, item0)
+        self._set_cell(row, 1, station.get("tags", ""))
+        self._set_cell(row, 2, station.get("country", ""))
+        self._set_cell(row, 3, station.get("codec", ""))
+        self._set_cell(row, 4, str(station.get("bitrate", "")), numeric=True)
+        self._set_cell(row, 5, station.get("language", ""))
+        com = station.get("has_commercial")
+        if com is True:
+            self._set_cell(row, 6, "Yes")
+        elif com is False:
+            self._set_cell(row, 6, "No")
+        else:
+            self._set_cell(row, 6, "\u2014")
+        self._table.setSortingEnabled(True)
+
+    def _current_result_index(self) -> int:
+        row = self._table.currentRow()
+        if row < 0:
+            return -1
+        item = self._table.item(row, 0)
+        if item is None:
+            return -1
+        return item.data(Qt.UserRole)
+
+    def _set_cell(self, row: int, col: int, text: str, numeric: bool = False):
+        item = QTableWidgetItem()
+        if numeric and text:
+            try:
+                item.setData(Qt.DisplayRole, int(text))
+            except ValueError:
+                item.setData(Qt.DisplayRole, text)
+        else:
+            item.setData(Qt.DisplayRole, text)
+        self._table.setItem(row, col, item)
 
     def refresh_playlist_combo(self):
         self._playlist_combo.clear()
@@ -251,6 +296,7 @@ class StationBrowserDialog(QDialog):
             return
         if not append:
             self._results = []
+            self._table.setSortingEnabled(False)
             self._table.setRowCount(0)
 
         self._search_offset += len(results)
@@ -278,16 +324,7 @@ class StationBrowserDialog(QDialog):
             self._scan_worker.start()
         else:
             for r in results:
-                self._results.append(r)
-                row = self._table.rowCount()
-                self._table.insertRow(row)
-                self._table.setItem(row, 0, QTableWidgetItem(r.get("name", "")))
-                self._table.setItem(row, 1, QTableWidgetItem(r.get("tags", "")))
-                self._table.setItem(row, 2, QTableWidgetItem(r.get("country", "")))
-                self._table.setItem(row, 3, QTableWidgetItem(r.get("codec", "")))
-                self._table.setItem(row, 4, QTableWidgetItem(str(r.get("bitrate", ""))))
-                self._table.setItem(row, 5, QTableWidgetItem(r.get("language", "")))
-                self._table.setItem(row, 6, QTableWidgetItem("\u2014"))
+                self._add_table_row(r)
             self._refresh_after_results(append)
 
     def _on_scan_progress(self, checked: int, total: int):
@@ -296,22 +333,7 @@ class StationBrowserDialog(QDialog):
     def _on_station_found(self, station: dict, seq: int):
         if seq != self._search_seq:
             return
-        self._results.append(station)
-        row = self._table.rowCount()
-        self._table.insertRow(row)
-        self._table.setItem(row, 0, QTableWidgetItem(station.get("name", "")))
-        self._table.setItem(row, 1, QTableWidgetItem(station.get("tags", "")))
-        self._table.setItem(row, 2, QTableWidgetItem(station.get("country", "")))
-        self._table.setItem(row, 3, QTableWidgetItem(station.get("codec", "")))
-        self._table.setItem(row, 4, QTableWidgetItem(str(station.get("bitrate", ""))))
-        self._table.setItem(row, 5, QTableWidgetItem(station.get("language", "")))
-        com = station.get("has_commercial")
-        if com is True:
-            self._table.setItem(row, 6, QTableWidgetItem("Yes"))
-        elif com is False:
-            self._table.setItem(row, 6, QTableWidgetItem("No"))
-        else:
-            self._table.setItem(row, 6, QTableWidgetItem("\u2014"))
+        self._add_table_row(station)
 
     def _refresh_after_results(self, append: bool = False):
         if not append:
@@ -340,8 +362,8 @@ class StationBrowserDialog(QDialog):
         QMessageBox.warning(self, "Search Error", f"Search failed: {msg}")
 
     def _add_to_playlist(self):
-        row = self._table.currentRow()
-        if row < 0:
+        idx = self._current_result_index()
+        if idx < 0:
             QMessageBox.information(self, "Add Station", "Select a station first.")
             return
 
@@ -353,7 +375,7 @@ class StationBrowserDialog(QDialog):
         catalog = self._get_catalog()
         if not catalog:
             return
-        r = self._results[row]
+        r = self._results[idx]
         stream = Stream(**catalog.station_to_stream(r))
         if self._pm.add_stream(pl_idx, stream):
             catalog.click_station(r.get("stationuuid", ""))
@@ -362,13 +384,13 @@ class StationBrowserDialog(QDialog):
             self._status_label.setText(f'"{stream.name}" already in "{self._pm.playlists[pl_idx].name}"')
 
     def _preview(self):
-        row = self._table.currentRow()
-        if row < 0:
+        idx = self._current_result_index()
+        if idx < 0:
             return
         catalog = self._get_catalog()
         if not catalog:
             return
-        r = self._results[row]
+        r = self._results[idx]
         stream_data = catalog.station_to_stream(r)
         url = stream_data.get("url_resolved") or stream_data.get("url", "")
         name = stream_data.get("name", "") or r.get("name", "")

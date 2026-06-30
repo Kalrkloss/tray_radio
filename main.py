@@ -202,9 +202,11 @@ class TrayRadioApp:
         self._player.play(url, codec_hint=stream.codec, output_device=self._proxy_config.output_device)
         self._tray.update_station_info(stream.name, "")
         self._tray.update_playing_state(True)
+        self._tray.notify(stream.name, "")
 
     def open_preview(self, name: str, url: str, codec: str = ""):
         self._current_station = Stream(uuid="__preview__", name=name, url=url, codec=codec)
+        self._had_metadata = False
         self._pm.set_current_stream("__preview__")
         self._pm.last_preview_name = name
         self._pm.last_preview_url = url
@@ -214,6 +216,7 @@ class TrayRadioApp:
         self._player.play(url, codec_hint=codec, output_device=self._proxy_config.output_device)
         self._tray.update_station_info(name, "")
         self._tray.update_playing_state(True)
+        self._tray.notify(name, "")
 
     def _show_about(self):
         AboutDialog.show_modal()
