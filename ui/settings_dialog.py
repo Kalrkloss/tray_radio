@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QSpinBox,
     QRadioButton, QButtonGroup, QPushButton, QGroupBox, QFormLayout,
-    QCheckBox, QComboBox,
+    QCheckBox, QComboBox, QSlider,
 )
 from PyQt5.QtCore import Qt
 
@@ -10,11 +10,12 @@ from player import get_output_devices
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, proxy_config: ProxyConfig, parent=None):
+    def __init__(self, proxy_config: ProxyConfig, player=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Proxy Settings")
         self.setMinimumWidth(450)
         self._proxy_config = proxy_config
+        self._player = player
         self._build_ui()
         self._load_config()
 
@@ -97,6 +98,18 @@ class SettingsDialog(QDialog):
         audio_layout.addRow("Device:", self._device_combo)
         layout.addWidget(audio_group)
 
+        volume_group = QGroupBox("Volume")
+        volume_layout = QVBoxLayout(volume_group)
+        self._volume_slider = QSlider(Qt.Horizontal)
+        self._volume_slider.setRange(0, 100)
+        self._volume_slider.setToolTip("Adjust playback volume")
+        self._volume_label = QLabel("100%")
+        self._volume_label.setAlignment(Qt.AlignCenter)
+        self._volume_slider.valueChanged.connect(self._on_volume_changed)
+        volume_layout.addWidget(self._volume_slider)
+        volume_layout.addWidget(self._volume_label)
+        layout.addWidget(volume_group)
+
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         ok_btn = QPushButton("OK")
@@ -145,7 +158,13 @@ class SettingsDialog(QDialog):
         if not lines:
             lines.append("(no system proxy detected)")
         self._sys_proxy_label.setText("\n".join(lines))
+        self._volume_slider.setValue(self._proxy_config.volume)
         self._on_mode_changed()
+
+    def _on_volume_changed(self, value: int):
+        self._volume_label.setText(f"{value}%")
+        if self._player:
+            self._player.set_volume(value)
 
     def _on_mode_changed(self):
         is_manual = self._rb_manual.isChecked()
@@ -161,6 +180,7 @@ class SettingsDialog(QDialog):
         self._proxy_config.workers = self._workers_spin.value()
         self._proxy_config.auto_play = self._auto_play_cb.isChecked()
         self._proxy_config.auto_start = self._auto_start_cb.isChecked()
+        self._proxy_config.volume = self._volume_slider.value()
         self._proxy_config.output_device = self._device_combo.currentData()
         set_auto_start(self._proxy_config.auto_start)
         self.accept()

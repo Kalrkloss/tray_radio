@@ -115,6 +115,7 @@ class TrayRadioApp:
             "play_previous": self._play_previous,
             "play_stream": self._play_stream,
             "show_settings": self._show_settings,
+            "show_volume_dialog": self._show_volume_dialog,
             "show_station_browser": self._show_station_browser,
             "show_playlist_editor": self._show_playlist_editor,
             "show_stream_info": self._show_stream_info,
@@ -123,6 +124,8 @@ class TrayRadioApp:
             "quit": self._quit,
         })
         self._tray.start()
+
+        self._player.set_volume(self._proxy_config.volume)
 
         self._player.state_changed.connect(self._on_player_state)
         self._player.error_occurred.connect(self._on_player_error)
@@ -232,12 +235,18 @@ class TrayRadioApp:
 
     def _show_settings(self):
         old_device = self._proxy_config.output_device
-        dialog = SettingsDialog(self._proxy_config)
+        dialog = SettingsDialog(self._proxy_config, player=self._player)
         if dialog.exec_() == SettingsDialog.Accepted:
             new_device = self._proxy_config.output_device
             self._save_proxy_config()
             if new_device != old_device:
                 self._player.set_output_device(new_device)
+
+    def _show_volume_dialog(self):
+        from ui.volume_dialog import VolumeDialog
+        dialog = VolumeDialog(self._player, self._proxy_config)
+        if dialog.exec_() == VolumeDialog.Accepted:
+            self._save_proxy_config()
 
     def _show_station_browser(self):
         if not self._catalogs:

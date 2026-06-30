@@ -342,16 +342,69 @@ def _av_container_stream(url: str, title_cb: Callable = None):
     return wrapper
 
 
+class VolumeController:
+    def __init__(self, initial=100):
+        self._volume = initial
+        self._lock = Lock()
+
+    def set(self, vol: int):
+        with self._lock:
+            self._volume = max(0, min(100, vol))
+
+    def get(self) -> int:
+        with self._lock:
+            return self._volume
+
+    def wrap(self, gen):
+        import array
+
+        class _VolumeWrapper:
+            def __init__(self, inner, ctl):
+                self._inner = inner
+                self._ctl = ctl
+
+            def _apply(self, data):
+                vol = self._ctl.get()
+                if vol >= 100:
+                    return data
+                if isinstance(data, array.array):
+                    arr = array.array(data.typecode, data)
+                else:
+                    arr = array.array('h')
+                    arr.frombytes(data)
+                gain = vol / 100.0
+                for i in range(len(arr)):
+                    arr[i] = int(arr[i] * gain)
+                if isinstance(data, array.array):
+                    return arr
+                return arr.tobytes()
+
+            def __next__(self):
+                return self._apply(next(self._inner))
+
+            def send(self, value):
+                return self._apply(self._inner.send(value))
+
+            def close(self):
+                self._inner.close()
+
+            def __iter__(self):
+                return self
+
+        return _VolumeWrapper(gen, self)
+
+
 class PlayWorker(QThread):
     ready = pyqtSignal(object, object, object)
     error = pyqtSignal(str)
 
-    def __init__(self, url: str, codec_hint: str = "", title_cb=None, device_name: str = ""):
+    def __init__(self, url: str, codec_hint: str = "", title_cb=None, device_name: str = "", volume_ctl: VolumeController = None):
         super().__init__()
         self._url = url
         self._codec_hint = codec_hint
         self._title_cb = title_cb
         self._device_name = device_name
+        self._volume_ctl = volume_ctl or VolumeController()
 
     def _make_device(self):
         device_id = find_device_id(self._device_name)
@@ -373,7 +426,7 @@ class PlayWorker(QThread):
                 if self.isInterruptionRequested():
                     return
                 device = self._make_device()
-                device.start(stream)
+                device.start(self._volume_ctl.wrap(stream))
                 self.ready.emit(None, stream, device)
                 return
 
@@ -394,7 +447,7 @@ class PlayWorker(QThread):
                         sample_rate=44100,
                     )
                     device = self._make_device()
-                    device.start(stream)
+                    device.start(self._volume_ctl.wrap(stream))
                 except Exception:
                     if client is not None:
                         client._stop_stream = True
@@ -405,7 +458,7 @@ class PlayWorker(QThread):
                     if self.isInterruptionRequested():
                         return
                     device = self._make_device()
-                    device.start(stream)
+                    device.start(self._volume_ctl.wrap(stream))
                     self.ready.emit(None, stream, device)
                     return
                 self.ready.emit(client, stream, device)
@@ -416,7 +469,7 @@ class PlayWorker(QThread):
                     if self.isInterruptionRequested():
                         return
                     device = self._make_device()
-                    device.start(stream)
+                    device.start(self._volume_ctl.wrap(stream))
                     self.ready.emit(None, stream, device)
                 except Exception as av_err:
                     raise RuntimeError(
@@ -440,7 +493,7 @@ class Player(QObject):
         self._stream_gen: Optional[object] = None
         self._current_url: Optional[str] = None
         self._playing = False
-        self._volume = 100
+        self._volume_ctl = VolumeController()
         self._lock = Lock()
         self._worker: Optional[PlayWorker] = None
         self._play_seq = 0
@@ -542,7 +595,7 @@ class Player(QObject):
             self._cleanup()
             self._current_url = url
             self._play_seq += 1
-            self._worker = PlayWorker(url, codec_hint=codec_hint, title_cb=self._on_stream_title, device_name=output_device)
+            self._worker = PlayWorker(url, codec_hint=codec_hint, title_cb=self._on_stream_title, device_name=output_device, volume_ctl=self._volume_ctl)
             self._worker._seq = self._play_seq
             self._worker.ready.connect(self._on_play_ready)
             self._worker.error.connect(self._on_play_error)
@@ -649,7 +702,7 @@ class Player(QObject):
                 logger.debug("set_output_device: creating device for %s", device_name)
                 device_id = find_device_id(device_name)
                 self._device = PlaybackDevice(device_id=device_id)
-                self._device.start(self._stream_gen)
+                self._device.start(self._volume_ctl.wrap(self._stream_gen))
                 self._playing = True
                 logger.debug("set_output_device: success")
             except Exception as e:
@@ -665,9 +718,9 @@ class Player(QObject):
         return self._current_url
 
     def set_volume(self, volume: int):
-        self._volume = max(0, min(100, volume))
+        self._volume_ctl.set(volume)
 
     def get_volume(self) -> int:
-        return self._volume
+        return self._volume_ctl.get()
 
 

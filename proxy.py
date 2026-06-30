@@ -48,6 +48,7 @@ class ProxyConfig:
     auto_play: bool = True
     auto_start: bool = False
     output_device: str = ""
+    volume: int = 100
 
     def to_dict(self):
         return {
@@ -60,6 +61,7 @@ class ProxyConfig:
             "auto_play": self.auto_play,
             "auto_start": self.auto_start,
             "output_device": self.output_device,
+            "volume": self.volume,
         }
 
     @classmethod
@@ -74,6 +76,7 @@ class ProxyConfig:
             auto_play=data.get("auto_play", True),
             auto_start=data.get("auto_start", False),
             output_device=data.get("output_device", ""),
+            volume=data.get("volume", 100),
         )
 
     def get_proxy_url(self) -> Optional[str]:
