@@ -19,8 +19,10 @@ from ui.station_browser import StationBrowserDialog
 from ui.stream_info import StreamInfoDialog
 from ui.add_stream_dialog import AddStreamDialog
 from ui.about_dialog import AboutDialog
+from ui.lms_dialog import LmsDialog
 from media_keys import MediaKeyHandler
 from pls_resolver import is_pls_url, resolve_pls_url
+from lms import LmsService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +51,7 @@ class TrayRadioApp:
         self._stream_info_dialog: StreamInfoDialog = None
         self._poll_timer: QTimer = None
         self._cached_proxy_url: Optional[str] = None
+        self._lms_service: LmsService = None
 
     def _load_proxy_config(self) -> ProxyConfig:
         try:
@@ -121,6 +124,7 @@ class TrayRadioApp:
             "show_stream_info": self._show_stream_info,
             "add_manual_stream": self._add_manual_stream,
             "show_about": self._show_about,
+            "show_lms": self._show_lms_dialog,
             "quit": self._quit,
         })
         self._tray.start()
@@ -131,6 +135,20 @@ class TrayRadioApp:
         self._player.error_occurred.connect(self._on_player_error)
         self._player.song_changed.connect(self._on_song_change)
         self._player.station_info_changed.connect(self._on_station_info)
+        self._player.volume_changed.connect(self._on_player_volume_changed)
+
+        self._lms_service = LmsService(CONFIG_DIR)
+        self._lms_service.player_stream.connect(self._on_lms_stream)
+        self._lms_service.volume_changed.connect(self._player.set_volume)
+        self._lms_service.pause_requested.connect(self._on_lms_pause)
+        self._lms_service.stop_requested.connect(self._on_lms_stop)
+        self._lms_service.configure(
+            host=self._proxy_config.lms_host,
+            port=self._proxy_config.lms_port,
+            player_name=self._proxy_config.lms_player_name,
+            auto_connect=self._proxy_config.lms_auto_connect,
+        )
+        self._lms_service.start()
 
         self._media_keys = MediaKeyHandler(self._media_key_callback)
         QTimer.singleShot(0, self._media_keys.install)
@@ -160,6 +178,11 @@ class TrayRadioApp:
             self._tray.notify(self._current_station.name, "")
         if not is_playing:
             self._had_metadata = False
+        # Sync state to LMS SlimProto for accurate STAT heartbeat
+        lms_slim = self._lms_service.slim_proto if self._lms_service else None
+        if lms_slim:
+            lms_mode = {"playing": "play", "paused": "pause", "stopped": "stop"}.get(state, "stop")
+            lms_slim.set_mode(lms_mode)
 
     def _on_player_error(self, msg: str):
         logger.error(f"Player error: {msg}")
@@ -233,9 +256,35 @@ class TrayRadioApp:
     def _show_about(self):
         AboutDialog.show_modal()
 
+    def _on_lms_stream(self, url: str, codec: str, name: str):
+        logger.info("LMS stream: %s (%s) - %s", url, codec, name)
+        if not url:
+            return
+        stream = Stream(uuid="__lms__", name=name or "LMS Stream", url=url, codec=codec)
+        self._play_stream(stream)
+
+    def _on_lms_pause(self):
+        logger.info("LMS requested pause")
+        self._player.pause()
+        self._tray.update_playing_state(False)
+
+    def _on_lms_stop(self):
+        logger.info("LMS requested stop")
+        self._stop_playback()
+
+    def _on_player_volume_changed(self, volume: int):
+        if self._lms_service:
+            self._lms_service.set_volume(volume)
+
+    def _show_lms_dialog(self):
+        if not self._lms_service:
+            return
+        dialog = LmsDialog(self._lms_service)
+        dialog.exec_()
+
     def _show_settings(self):
         old_device = self._proxy_config.output_device
-        dialog = SettingsDialog(self._proxy_config, player=self._player)
+        dialog = SettingsDialog(self._proxy_config, player=self._player, lms_service=self._lms_service)
         if dialog.exec_() == SettingsDialog.Accepted:
             new_device = self._proxy_config.output_device
             self._save_proxy_config()
@@ -256,7 +305,8 @@ class TrayRadioApp:
             QMessageBox.warning(None, "Catalog Error", "No station catalogs reachable")
             return
         dialog = StationBrowserDialog(
-            self._catalogs, self._pm, proxy_config=self._proxy_config
+            self._catalogs, self._pm, proxy_config=self._proxy_config,
+            lms_service=self._lms_service,
         )
         dialog.open_preview = self.open_preview
         dialog.refresh_playlist_combo()
@@ -308,6 +358,8 @@ class TrayRadioApp:
 
     def _quit(self):
         logger.info("Shutting down...")
+        if self._lms_service:
+            self._lms_service.stop()
         self._media_keys.unregister()
         if self._tray:
             self._tray._notifier.shutdown()

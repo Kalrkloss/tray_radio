@@ -144,6 +144,11 @@ class TrayApp:
             lambda icon, item: self.cmd_queue.put(("show_volume_dialog", [])),
         ))
 
+        items.append(MenuItem(
+            "LMS…",
+            lambda icon, item: self.cmd_queue.put(("show_lms", [])),
+        ))
+
         items.append(Menu.SEPARATOR)
 
         items.append(MenuItem(

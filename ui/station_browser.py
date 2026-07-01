@@ -9,6 +9,7 @@ from catalog import CatalogBase
 from playlist_manager import PlaylistManager, Stream
 from scanner import scan_streams
 from proxy import ProxyConfig
+from lms.models import LmsPlayer
 
 
 class SearchWorker(QThread):
@@ -55,13 +56,14 @@ class ScanWorker(QThread):
 
 class StationBrowserDialog(QDialog):
     def __init__(self, catalogs: list[CatalogBase], playlist_manager: PlaylistManager,
-                 proxy_config: ProxyConfig = None, parent=None):
+                 proxy_config: ProxyConfig = None, lms_service=None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Browse Radio Stations")
         self.setMinimumSize(700, 500)
         self._catalogs = catalogs
         self._pm = playlist_manager
         self._proxy_config = proxy_config or ProxyConfig()
+        self._lms_service = lms_service
         self._results = []
         self._worker = None
         self._scan_worker = None
@@ -71,6 +73,7 @@ class StationBrowserDialog(QDialog):
         self._last_params = None
         self._last_results_full = False
         self._build_ui()
+        self._update_lms_button()
 
     def _get_catalog(self) -> CatalogBase:
         idx = self._catalog_combo.currentIndex()
@@ -144,10 +147,15 @@ class StationBrowserDialog(QDialog):
         self._add_btn.clicked.connect(self._add_to_playlist)
         self._preview_btn = QPushButton("Preview")
         self._preview_btn.clicked.connect(self._preview)
+        self._lms_btn = QPushButton("Add to LMS")
+        self._lms_btn.setToolTip("Add stream to an LMS player\u2019s playlist")
+        self._lms_btn.clicked.connect(self._add_to_lms_playlist)
+        self._lms_btn.setEnabled(False)
 
         btn_layout.addWidget(QLabel("Add to:"))
         btn_layout.addWidget(self._playlist_combo, 1)
         btn_layout.addWidget(self._add_btn)
+        btn_layout.addWidget(self._lms_btn)
         btn_layout.addWidget(self._preview_btn)
         btn_layout.addStretch()
 
@@ -346,6 +354,7 @@ class StationBrowserDialog(QDialog):
         self._status_label.setText(
             f"Found {total_shown} stations"
         )
+        self._update_lms_button()
 
     def _on_scan_done(self, _responsive, seq: int, append: bool = False):
         if seq != self._search_seq:
@@ -382,6 +391,51 @@ class StationBrowserDialog(QDialog):
             self._status_label.setText(f'Added "{stream.name}" to "{self._pm.playlists[pl_idx].name}"')
         else:
             self._status_label.setText(f'"{stream.name}" already in "{self._pm.playlists[pl_idx].name}"')
+
+    def _add_to_lms_playlist(self):
+        idx = self._current_result_index()
+        if idx < 0:
+            QMessageBox.information(self, "Add to LMS", "Select a station first.")
+            return
+        if not self._lms_service or not self._lms_service.cli or not self._lms_service.cli.is_connected:
+            QMessageBox.information(self, "Add to LMS", "LMS is not connected.\nConfigure it in Settings first.")
+            return
+
+        catalog = self._get_catalog()
+        if not catalog:
+            return
+        r = self._results[idx]
+        stream_data = catalog.station_to_stream(r)
+        url = stream_data.get("url_resolved") or stream_data.get("url", "")
+        name = stream_data.get("name", "") or r.get("name", "")
+
+        players = self._lms_service.get_players()
+        if not players:
+            QMessageBox.information(self, "Add to LMS", "No LMS players found.")
+            return
+
+        if len(players) == 1:
+            target = players[0]
+        else:
+            items = [f"{p.name}  ({p.model})" for p in players]
+            from PyQt5.QtWidgets import QInputDialog
+            selected, ok = QInputDialog.getItem(
+                self, "Select LMS Player", "Target player:", items, 0, False,
+            )
+            if not ok:
+                return
+            target = players[items.index(selected)]
+
+        self._lms_service.cli.playlist_add_url(target.playerid, url, name)
+        self._status_label.setText(f'Sent "{name}" to {target.name}')
+
+    def _update_lms_button(self):
+        connected = bool(self._lms_service and self._lms_service.cli and self._lms_service.cli.is_connected)
+        self._lms_btn.setEnabled(connected)
+        if connected:
+            self._lms_btn.setToolTip("Add stream to an LMS player\u2019s playlist")
+        else:
+            self._lms_btn.setToolTip("LMS not connected \u2014 configure in Settings")
 
     def _preview(self):
         idx = self._current_result_index()
