@@ -28,6 +28,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+
 logger = logging.getLogger("main")
 
 
@@ -284,12 +285,25 @@ class TrayRadioApp:
 
     def _show_settings(self):
         old_device = self._proxy_config.output_device
+        old_lms = (self._proxy_config.lms_host, self._proxy_config.lms_port,
+                   self._proxy_config.lms_player_name, self._proxy_config.lms_auto_connect)
         dialog = SettingsDialog(self._proxy_config, player=self._player, lms_service=self._lms_service)
         if dialog.exec_() == SettingsDialog.Accepted:
             new_device = self._proxy_config.output_device
             self._save_proxy_config()
             if new_device != old_device:
                 self._player.set_output_device(new_device)
+            new_lms = (self._proxy_config.lms_host, self._proxy_config.lms_port,
+                       self._proxy_config.lms_player_name, self._proxy_config.lms_auto_connect)
+            if new_lms != old_lms and self._proxy_config.lms_host:
+                self._lms_service.stop()
+                self._lms_service.configure(
+                    host=self._proxy_config.lms_host,
+                    port=self._proxy_config.lms_port,
+                    player_name=self._proxy_config.lms_player_name,
+                    auto_connect=self._proxy_config.lms_auto_connect,
+                )
+                self._lms_service.start()
 
     def _show_volume_dialog(self):
         from ui.volume_dialog import VolumeDialog

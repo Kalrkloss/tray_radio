@@ -29,10 +29,13 @@ class LmsDialog(QDialog):
         status_layout = QHBoxLayout()
         self._status_label = QLabel("Disconnected")
         self._status_label.setStyleSheet("font-weight: bold;")
+        self._connect_btn = QPushButton("Connect")
+        self._connect_btn.clicked.connect(self._on_connect)
         self._refresh_btn = QPushButton("Refresh")
         self._refresh_btn.clicked.connect(self._refresh)
         status_layout.addWidget(self._status_label)
         status_layout.addStretch()
+        status_layout.addWidget(self._connect_btn)
         status_layout.addWidget(self._refresh_btn)
         layout.addLayout(status_layout)
 
@@ -70,16 +73,30 @@ class LmsDialog(QDialog):
         close_layout.addWidget(close_btn)
         layout.addLayout(close_layout)
 
+    def _on_connect(self):
+        if not self._lms:
+            return
+        self._connect_btn.setEnabled(False)
+        self._connect_btn.setText("Connecting...")
+        self._lms.reconnect()
+        QTimer.singleShot(1000, self._refresh)
+
     def _refresh(self):
+        if not self._lms:
+            return
         connected = self._lms.is_connected if self._lms else False
         if connected:
             self._status_label.setText("\U0001f7e2 Connected")
             self._status_label.setStyleSheet("font-weight: bold; color: green;")
+            self._connect_btn.setEnabled(False)
+            self._connect_btn.setText("Connect")
             self._players = self._lms.get_players()
             self._populate_table()
         else:
             self._status_label.setText("\u26ab Disconnected")
             self._status_label.setStyleSheet("font-weight: bold;")
+            self._connect_btn.setEnabled(True)
+            self._connect_btn.setText("Connect")
             self._players = []
             self._table.setRowCount(0)
 

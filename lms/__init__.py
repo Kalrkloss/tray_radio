@@ -164,6 +164,10 @@ class LmsService(QObject):
             self._refresh_players()
         return self._players
 
+    def reconnect(self):
+        if self._server:
+            self._connect_slim(self._server.host)
+
     def set_server(self, host: str, port: int):
         self.stop()
         self._server = LmsServer(host=host, port=port, name="", is_alive=False)

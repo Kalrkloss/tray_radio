@@ -483,6 +483,7 @@ class Player(QObject):
     state_changed = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
     song_changed = pyqtSignal(str)
+    media_changed = pyqtSignal(str)
     station_info_changed = pyqtSignal(dict)
     volume_changed = pyqtSignal(int)
 
