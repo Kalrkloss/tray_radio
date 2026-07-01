@@ -1,7 +1,0 @@
-2026-06-30 14:03:24,878 [INFO] main: Manual proxy: http://192.0.0.4:8080
-2026-06-30 14:03:25,660 [INFO] catalog: radio-browser.info reachable at https://de1.api.radio-browser.info
-2026-06-30 14:03:25,662 [INFO] catalog: Curated Stations catalog loaded (160 stations)
-2026-06-30 14:03:25,682 [INFO] notifier: Silent toast notifier started
-2026-06-30 14:03:25,731 [INFO] main: Tray icon ready
-2026-06-30 14:03:25,732 [INFO] media_keys: Media key hook installed
-2026-06-30 14:03:28,454 [INFO] player: Playing: Ambient Modern

@@ -49,6 +49,12 @@ class ProxyConfig:
     auto_start: bool = False
     output_device: str = ""
     volume: int = 100
+    lms_host: str = ""
+    lms_port: int = 9000
+    lms_player_name: str = "TrayRadio"
+    lms_player_mac: str = ""
+    lms_auto_connect: bool = False
+    lms_known_servers: list = None
 
     def to_dict(self):
         return {
@@ -62,10 +68,17 @@ class ProxyConfig:
             "auto_start": self.auto_start,
             "output_device": self.output_device,
             "volume": self.volume,
+            "lms_host": self.lms_host,
+            "lms_port": self.lms_port,
+            "lms_player_name": self.lms_player_name,
+            "lms_player_mac": self.lms_player_mac,
+            "lms_auto_connect": self.lms_auto_connect,
+            "lms_known_servers": self.lms_known_servers or [],
         }
 
     @classmethod
     def from_dict(cls, data: dict):
+        known = data.get("lms_known_servers")
         return cls(
             mode=data.get("mode", "system"),
             server=data.get("server", ""),
@@ -77,6 +90,12 @@ class ProxyConfig:
             auto_start=data.get("auto_start", False),
             output_device=data.get("output_device", ""),
             volume=data.get("volume", 100),
+            lms_host=data.get("lms_host", ""),
+            lms_port=data.get("lms_port", 9000),
+            lms_player_name=data.get("lms_player_name", "TrayRadio"),
+            lms_player_mac=data.get("lms_player_mac", ""),
+            lms_auto_connect=data.get("lms_auto_connect", False),
+            lms_known_servers=known if isinstance(known, list) else [],
         )
 
     def get_proxy_url(self) -> Optional[str]:

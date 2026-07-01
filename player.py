@@ -482,9 +482,10 @@ class PlayWorker(QThread):
 class Player(QObject):
     state_changed = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
-    media_changed = pyqtSignal(str)
     song_changed = pyqtSignal(str)
+    media_changed = pyqtSignal(str)
     station_info_changed = pyqtSignal(dict)
+    volume_changed = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -719,6 +720,7 @@ class Player(QObject):
 
     def set_volume(self, volume: int):
         self._volume_ctl.set(volume)
+        self.volume_changed.emit(volume)
 
     def get_volume(self) -> int:
         return self._volume_ctl.get()
